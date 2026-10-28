@@ -26,7 +26,7 @@ class GuiIntegrationTests(unittest.TestCase):
         fixture = fixtures.ExtractionTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
-        window = Window(); window.silent = True
+        window = Window(); window.silent = True; window.height_kind.setCurrentIndex(1); window.unit.setCurrentIndex(1)
         window.show()
         window.vector.setText(str(fixture.vector)); window.inspect_vector()
         window.raster.setText(str(fixture.raster)); window.inspect_raster()
@@ -47,7 +47,7 @@ class GuiIntegrationTests(unittest.TestCase):
     def test_error_then_success_without_restart(self):
         fixture = fixtures.ExtractionTests(); fixture.setUp()
         self.addCleanup(fixture.doCleanups)
-        window = Window(); window.silent = True
+        window = Window(); window.silent = True; window.height_kind.setCurrentIndex(1); window.unit.setCurrentIndex(1)
         window.vector.setText(str(fixture.vector)); window.inspect_vector()
         window.raster.setText(str(fixture.root / 'missing.tif'))
         window.start()
@@ -65,7 +65,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertTrue(window.result_path.exists(), window.log.toPlainText())
         window.close()
     def test_filter_controls(self):
-        window = Window(); window.silent = True
+        window = Window(); window.silent = True; window.height_kind.setCurrentIndex(1); window.unit.setCurrentIndex(1)
         window.mode.setCurrentIndex(1)
         self.assertFalse(window.maximum.isEnabled())
         window.mode.setCurrentIndex(2)

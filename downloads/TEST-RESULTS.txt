@@ -1,8 +1,10 @@
-Terrain Studio 0.2.0
-19 tests passed with exit code 0 on Linux and Windows binaries under Wine 10.
-Includes GUI error recovery without restart, repeated output, threaded extraction, preview, band selection, rotated raster, missing CRS override, Unicode paths and cancellation.
-Frozen EXE passed preview + threaded extraction + Shapefile output with networking disconnected.
-Installer extraction succeeded and all 1120 payload files match the tested bundle by SHA-256.
-Not validated: real Windows hardware, full installer/uninstaller UI flow, CUDA.
-The original user-specific error cannot be identified without its message/data.
-CPU edition; AOI memory limit remains 40 million raster cells.
+Terrain Studio 0.3.0
+25 tests passed with exit status 0 on Linux and Windows binaries under Wine.
+World cases: Tehran, New York, Tokyo, Nairobi, Rio, using known synthetic raster coordinates.
+Output compared to an independent union of >30 height cells intersected with an irregular AOI containing a hole.
+Verified CRS and PRJ, numeric longitude/latitude coordinates, exact AOI clipping, DEM/DSM alignment across different CRS, units, nodata, GUI preview and error recovery.
+Frozen executable cross-CRS self-test passed: WGS84 DEM aligned to UTM DSM; DSM-DEM >30; output in WGS84 AOI CRS with exact boundary clipping.
+No actual Windows hardware test; full installer UI and original user data were not tested.
+No claim that unknown/mistagged source CRS or incompatible vertical datums can be corrected automatically.
+CPU edition; 40 million AOI cell limit remains.
+Final installer payload extracted successfully; all 1121 files match the tested bundle. Extracted EXE cross-CRS and GUI workflow self-test passed in the disconnected clean Wine prefix.

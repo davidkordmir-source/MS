@@ -4,21 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import tempfile
-from contextlib import ExitStack
-from rasterio.vrt import WarpedVRT
-from rasterio.warp import calculate_default_transform
-from shapely import make_valid
-from shapely.geometry import box
-
 import fiona
 import numpy as np
 import rasterio
 from rasterio.features import geometry_mask, shapes
-from rasterio.mask import mask
 from rasterio.windows import from_bounds, transform as window_transform
-from pyproj import CRS, Transformer
+from pyproj import CRS
 from shapely.geometry import shape, mapping
-from shapely.ops import transform, unary_union
+from shapely.ops import unary_union
 
 
 @dataclass
@@ -34,39 +27,21 @@ class Options:
     workers: int = min(32, max(1, os.cpu_count() or 1))
     band: int = 1
     vector_crs: str = ""
+    dsm: str = ""
+    height_kind: str = "absolute"
+    dsm_band: int = 1
+    unit_scale: float | None = None
 
 
 class CancelledError(Exception):
     pass
 
 
+from terrain_export.surface import read_aoi, load_surface, project
+
+
 def area_of_interest(path, radius, crs_override=""):
-    if not Path(path).is_file():
-        raise ValueError("Vector file does not exist.")
-    with fiona.open(path) as src:
-        if not src.crs and not crs_override:
-            raise ValueError('Input vector must have a defined CRS.')
-        crs = CRS.from_user_input(crs_override or src.crs)
-        geoms = [shape(f['geometry']) for f in src if f['geometry']]
-    geoms = [make_valid(g) if not g.is_valid else g for g in geoms if not g.is_empty]
-    if not geoms:
-        raise ValueError('Vector is empty or contains invalid geometry.')
-    types = {g.geom_type for g in geoms}
-    if types <= {'Point', 'MultiPoint'}:
-        if not np.isfinite(radius) or radius <= 0:
-            raise ValueError('Buffer radius must be positive (metres).')
-        # Local azimuthal equidistant projection: buffer units stay metres even for lon/lat input.
-        ll = Transformer.from_crs(crs, 4326, always_xy=True).transform
-        center = transform(ll, unary_union(geoms)).centroid
-        metric = CRS.from_proj4(f'+proj=aeqd +lat_0={center.y} +lon_0={center.x} +datum=WGS84 +units=m')
-        forward = Transformer.from_crs(crs, metric, always_xy=True).transform
-        backward = Transformer.from_crs(metric, crs, always_xy=True).transform
-        aoi = transform(backward, unary_union([transform(forward, g).buffer(radius) for g in geoms]))
-    elif types <= {'Polygon', 'MultiPolygon'}:
-        aoi = unary_union(geoms)
-    else:
-        raise ValueError('Use a point layer OR a polygon layer; mixed/line layers are unsupported.')
-    return aoi, crs
+    return read_aoi(path, radius, crs_override)
 
 
 def extract(options, progress=lambda message: None, cancelled=lambda: False):
@@ -87,38 +62,11 @@ def extract(options, progress=lambda message: None, cancelled=lambda: False):
     if out.suffix.lower() != '.shp':
         raise ValueError('Output must end in .shp.')
     out.parent.mkdir(parents=True, exist_ok=True)
-    if any(out.with_suffix(s).exists() for s in ('.shp', '.shx', '.dbf', '.prj', '.cpg')):
+    if any(out.with_suffix(s).exists() for s in ('.shp', '.shx', '.dbf', '.prj', '.cpg', '.json')):
         raise ValueError('Choose a new output name; existing datasets will not be overwritten.')
     progress('Reading area of interest…')
-    aoi, vector_crs = area_of_interest(o.vector, o.radius, o.vector_crs)
-    with rasterio.Env(GDAL_NUM_THREADS=str(o.workers)):
-        with ExitStack() as stack:
-            original = stack.enter_context(rasterio.open(o.raster))
-            src = original
-            if not src.crs:
-                raise ValueError('Raster CRS is missing.')
-            if not 1 <= o.band <= src.count:
-                raise ValueError('Selected raster band is unavailable.')
-            if src.transform.b != 0 or src.transform.d != 0 or src.transform.a <= 0 or src.transform.e >= 0:
-                progress('Normalizing rotated raster grid…')
-                grid, width, height = calculate_default_transform(src.crs, src.crs, src.width, src.height, *src.bounds)
-                src = stack.enter_context(WarpedVRT(src, crs=src.crs, transform=grid, width=width, height=height))
-            aoi = transform(Transformer.from_crs(vector_crs, src.crs, always_xy=True).transform, aoi)
-            if not aoi.intersects(box(*src.bounds)):
-                raise ValueError('Vector and raster do not overlap. Check their CRS.')
-            aoi = aoi.intersection(box(*src.bounds))
-            check_cancel()
-            # Bound peak working memory before reading the cropped raster.
-            win = from_bounds(*aoi.bounds, transform=src.transform)
-            cells = min(src.width, max(1, win.width + 2)) * min(src.height, max(1, win.height + 2))
-            if cells > 40_000_000:
-                raise ValueError('AOI exceeds the 40 million cell memory limit. Use a smaller AOI or resample the raster.')
-            progress('Masking raster…')
-            data, affine = mask(src, [mapping(aoi)], crop=True, indexes=o.band, filled=False)
-            values = data.astype('float64').filled(np.nan)
-            values = values * original.scales[o.band - 1] + original.offsets[o.band - 1]
-            crs = src.crs
-            unit = (original.units[o.band - 1] or 'unknown')[:40]
+    values, affine, crs, original_aoi, vector_crs, aoi, metadata = load_surface(o, progress)
+    unit = metadata['z_unit']
     check_cancel()
     valid = np.isfinite(values)
     progress('Applying elevation filter…')
@@ -151,20 +99,34 @@ def extract(options, progress=lambda message: None, cancelled=lambda: False):
     # 4-connected cells form one object. Values do not identify buildings or mountains semantically.
     polygons = (shape(g) for g, _ in shapes(selected.astype('uint8'), mask=selected, transform=affine, connectivity=4))
     def record(poly):
-        win = from_bounds(*poly.bounds, transform=affine).round_offsets().round_lengths()
-        r, c = int(win.row_off), int(win.col_off)
-        h, w = int(win.height), int(win.width)
-        subset = values[r:r+h, c:c+w]
-        inside = geometry_mask([mapping(poly)], subset.shape, window_transform(win, affine), invert=True)
-        z = subset[inside & np.isfinite(subset)]
-        return mapping(poly), dict(elev_min=float(z.min()), elev_max=float(z.max()), elev_mean=float(z.mean()),
-                                   pix_count=int(z.size), z_unit=unit)
+        import math
+        from rasterio.windows import Window
+        def polygonal(g):
+            if g.geom_type == 'Polygon': return g if g.area > 0 else None
+            parts = [polygonal(p) for p in getattr(g, 'geoms', [])]
+            parts = [p for p in parts if p is not None and not p.is_empty]
+            return unary_union(parts) if parts else None
+        clipped = polygonal(poly.intersection(aoi))
+        if clipped is None: return None
+        raw = from_bounds(*clipped.bounds, transform=affine)
+        r, c = max(0, math.floor(raw.row_off)), max(0, math.floor(raw.col_off))
+        end_r = min(values.shape[0], math.ceil(raw.row_off + raw.height))
+        end_c = min(values.shape[1], math.ceil(raw.col_off + raw.width))
+        win = Window(c, r, end_c-c, end_r-r)
+        subset = values[r:end_r, c:end_c]
+        inside = geometry_mask([mapping(clipped)], subset.shape, window_transform(win, affine), invert=True, all_touched=True)
+        z = subset[inside & selected[r:end_r, c:end_c] & np.isfinite(subset)]
+        if not z.size: return None
+        output_geometry = polygonal(project(clipped, crs, vector_crs).intersection(original_aoi))
+        if output_geometry is None: return None
+        return mapping(output_geometry), dict(elev_min=float(z.min()), elev_max=float(z.max()), elev_mean=float(z.mean()),
+                                   pix_count=int(z.size), z_unit=unit, h_ref=metadata['reference'])
     schema = {'geometry': 'Polygon', 'properties': {'obj_id': 'int', 'elev_min': 'float:24.8',
-              'elev_max': 'float:24.8', 'elev_mean': 'float:24.8', 'pix_count': 'int:18', 'z_unit': 'str:40'}}
+              'elev_max': 'float:24.8', 'elev_mean': 'float:24.8', 'pix_count': 'int:18', 'z_unit': 'str:40', 'h_ref': 'str:16'}}
     # Stage the entire shapefile bundle, publishing only after successful processing.
     with tempfile.TemporaryDirectory(dir=out.parent) as staging:
         temp = Path(staging) / out.name
-        with fiona.open(temp, 'w', driver='ESRI Shapefile', crs_wkt=crs.to_wkt(), schema=schema, encoding='UTF-8') as dst:
+        with fiona.open(temp, 'w', driver='ESRI Shapefile', crs_wkt=vector_crs.to_wkt(version='WKT1_ESRI'), schema=schema, encoding='UTF-8') as dst:
             with ThreadPoolExecutor(max_workers=o.workers) as pool:
                 # Bounded batches avoid submitting millions of objects to the executor at once.
                 import itertools
@@ -172,9 +134,27 @@ def extract(options, progress=lambda message: None, cancelled=lambda: False):
                 while batch := list(itertools.islice(polygons, max(1, o.workers * 2))):
                     check_cancel()
                     progress(f'Writing polygons: {count} …')
-                    for geometry, props in pool.map(record, batch):
+                    for item in pool.map(record, batch):
+                        if item is None: continue
+                        geometry, props = item
                         count += 1
                         dst.write({'geometry': geometry, 'properties': {'obj_id': count, **props}})
+        if not count: raise ValueError('No valid raster cells match the area and elevation filter.')
+        with fiona.open(temp) as verified:
+            if not CRS(verified.crs).equals(vector_crs, ignore_axis_order=True):
+                raise RuntimeError('Written Shapefile CRS differs from the input polygon CRS; output withheld.')
+            output_bounds = list(verified.bounds)
+            for feature in verified:
+                geometry = shape(feature['geometry'])
+                if not geometry.is_valid or geometry.difference(original_aoi).area > max(original_aoi.area*1e-10, 1e-18):
+                    raise RuntimeError('Output escaped the requested polygon; output withheld.')
+        import json
+        metadata['output_bounds'] = output_bounds
+        metadata.update({'threshold_mode': o.mode, 'minimum': o.minimum, 'maximum': o.maximum,
+                         'feature_count': count, 'output_wkt': vector_crs.to_wkt(),
+                         'boundary': 'Exact intersection with user AOI; 4-connected selected cells',
+                         'dem_or_raster': o.raster, 'dsm': o.dsm})
+        temp.with_suffix('.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
         check_cancel()
         published = []
         try:

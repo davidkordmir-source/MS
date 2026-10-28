@@ -30,7 +30,8 @@ class ExtractionTests(unittest.TestCase):
         count = extract(Options(str(self.vector), str(self.raster), str(output), mode, minimum, maximum, gpu=gpu, workers=2))
         with fiona.open(output) as src:
             records = [dict(f['properties']) for f in src]
-            self.assertEqual(src.crs.to_epsg(), 32639)
+            with fiona.open(self.vector) as area:
+                self.assertEqual(src.crs.to_epsg(), area.crs.to_epsg() if area.crs else 32639)
         return count, records
     def test_connected_objects_and_statistics(self):
         count, records = self.run_filter()

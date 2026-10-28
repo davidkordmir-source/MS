@@ -7,6 +7,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Installer created in dist\installer\TerrainStudio-0.2.0-Setup.exe
+echo Installer created in dist\installer\TerrainStudio-0.3.0-Setup.exe
 explorer.exe "%~dp0dist\installer"
 pause

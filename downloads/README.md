@@ -1,10 +1,10 @@
-# Terrain Studio 0.2.0 — Offline Windows x64
+# Terrain Studio 0.3.0 — Offline Windows x64
 
-Run TerrainStudio-0.2.0-Setup.exe. Close the previous version first.
-No Internet, Python or ArcGIS is required on the destination computer. CPU edition.
+Run TerrainStudio-0.3.0-Setup.exe. Close the previous version first.
+Use your own DEM, DSM and AOI polygon. Select the height reference explicitly: DEM value, DSM value, or DSM−DEM. Thresholds are in metres.
 
-New interface with raster preview and bundled synthetic demo: click the demo button, then Start.
-Fixes and features: selectable raster band, rotated-grid normalization, explicit CRS override, clear overlap errors, automatic output names, cancellation, logs and worker cleanup.
+Output is reprojected to the AOI polygon CRS and intersected with the exact AOI boundary, including holes. The written Shapefile CRS and geometry are verified before publication. Keep SHP/SHX/DBF/PRJ/CPG together. A companion JSON records CRS, bounds, threshold and source reference.
 
-19 integration tests passed on Linux and Windows binaries under Wine. The frozen GUI workflow was tested offline. Real Windows hardware and full installer UI were not tested.
-See INSTALL-fa.txt, TEST-RESULTS.txt, SHA256.txt, preview.png and the source ZIP.
+Preview uses the selected surface and AOI, not an unrelated full raster.
+25 tests passed on Linux and Windows binaries under Wine, including independent geographic expectations at five locations. The frozen cross-CRS and GUI workflow passed offline. Real Windows hardware and the original user data have not been tested.
+See INSTALL-fa.txt, TEST-RESULTS.txt, SHA256.txt and the source ZIP.
