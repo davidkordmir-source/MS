@@ -1,2 +1,2 @@
-db474a44f8eadef2854583cbafb738e276e84c7fdbb4a102b24a17bab4061fdf  TerrainPolygon-Setup.exe
-23b5054e39e6e6154c529145ea0122fbf38ce283790f3289bc23eb7567b5a216  TerrainPolygon-Source.zip
+5e8bc17aaae56ac123c01bcf094d480be9fe75de7b3fc3b84b8de87edef670c9  TerrainStudio-0.2.0-Setup.exe
+8dd91fb6d01401ca65c4d95024830ab793d27718762a0ddf00f44dc89a99768d  TerrainStudio-0.2.0-Source.zip

@@ -1,0 +1,29 @@
+Terrain Polygon Export uses third-party components. See the licenses directory for
+upstream license texts. This distribution includes dynamically linked Qt/PySide6
+6.8.3 under LGPLv3, not under a commercial Qt license. The commercial license text
+inside upstream wheel metadata is included only as part of the original notices.
+
+Qt source: https://download.qt.io/archive/qt/6.8/6.8.3/submodules/
+PySide6/Shiboken source: https://download.qt.io/QtForPython/pyside6/PySide6-6.8.3-src/
+Upstream repositories: https://code.qt.io/cgit/qt/qtbase.git/?h=v6.8.3
+https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.8.3
+
+Qt libraries remain separate DLL files in _internal/PySide6 so users may replace
+compatible LGPL components. Reverse engineering for debugging modifications of
+LGPL components is permitted. Application source and packaging instructions are
+provided in the accompanying project source archive.
+
+Other upstream projects:
+CPython https://www.python.org/ (PSF license)
+NumPy https://numpy.org/ (BSD and bundled notices)
+Rasterio https://github.com/rasterio/rasterio (BSD)
+Fiona https://github.com/Toblerity/Fiona (BSD)
+GDAL https://gdal.org/ (MIT and bundled notices)
+PROJ https://proj.org/ (MIT)
+PyProj https://github.com/pyproj4/pyproj (MIT)
+Shapely https://github.com/shapely/shapely (BSD)
+GEOS https://libgeos.org/ (LGPL)
+PyInstaller https://pyinstaller.org/ (GPL with bootloader exception)
+
+The application performs local file processing. It has no updater or online
+activation and does not require Internet access on the destination computer.
