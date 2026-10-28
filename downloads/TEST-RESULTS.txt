@@ -1,0 +1,22 @@
+Build and validation — Terrain Polygon Export 0.1.0
+
+Target: Windows 10/11 x64; standard CPU edition.
+Builder: Windows Python 3.12.10 / PyInstaller 6.16 under Wine 10;
+native NSIS 3.11 installer compiler on Debian.
+
+PASSED: 10 GIS integration tests using Windows library binaries under Wine.
+PASSED: frozen EXE functional test (GUI load, raster mask, threshold,
+polygonization, statistics, complete Shapefile bundle).
+PASSED: same functional test in a fresh Wine prefix with no installed Python
+and the Docker container disconnected from all networks.
+PASSED: installer extraction integrity (7-Zip).
+PASSED: 1113 installer payload files match the tested application by SHA-256.
+PASSED: extracted installer payload functional test in the disconnected prefix.
+
+NOT VERIFIED: actual Windows hardware; complete installer/uninstaller UI flow.
+Installer launch through 32-bit Wine/QEMU is blocked by the host's loader
+architecture limitation. No successful installation is claimed from that test.
+GPU/CUDA is not bundled or hardware-tested in this edition.
+The EXE is not digitally signed.
+
+The destination computer needs neither Internet nor Python nor ArcGIS.
