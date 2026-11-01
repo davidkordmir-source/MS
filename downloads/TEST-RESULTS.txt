@@ -1,10 +1,32 @@
-Terrain Studio 0.3.0
-25 tests passed with exit status 0 on Linux and Windows binaries under Wine.
-World cases: Tehran, New York, Tokyo, Nairobi, Rio, using known synthetic raster coordinates.
-Output compared to an independent union of >30 height cells intersected with an irregular AOI containing a hole.
-Verified CRS and PRJ, numeric longitude/latitude coordinates, exact AOI clipping, DEM/DSM alignment across different CRS, units, nodata, GUI preview and error recovery.
-Frozen executable cross-CRS self-test passed: WGS84 DEM aligned to UTM DSM; DSM-DEM >30; output in WGS84 AOI CRS with exact boundary clipping.
-No actual Windows hardware test; full installer UI and original user data were not tested.
-No claim that unknown/mistagged source CRS or incompatible vertical datums can be corrected automatically.
-CPU edition; 40 million AOI cell limit remains.
-Final installer payload extracted successfully; all 1121 files match the tested bundle. Extracted EXE cross-CRS and GUI workflow self-test passed in the disconnected clean Wine prefix.
+Terrain Studio 0.4.0 — validation on 2026-11-01
+
+35 tests passed, zero failures, on Linux with Python 3.12.
+35 tests passed, zero failures, with Windows Python 3.12.10 under Wine 10.
+GUI tests include actual mouse clicks to draw an AOI, a single DSM with no DEM,
+one output dataset with separate feature heights read from that same raster,
+invalid drawing rejection, repeated output, error recovery, stale preview,
+NoData, and map layout at 980x700 and 1220x950.
+Spatial tests independently compare output with selected cells intersected with
+the AOI, including five locations, holes, disconnected clipped parts, CRS,
+scale/offset, units, NoData and tile seams. Legacy DEM/DSM difference tests are
+retained for backend compatibility; the new GUI uses one raster's elevation.
+
+A 6500x6500 (42,250,000 pixel) synthetic DEM was extracted as one polygon with
+all pixels counted and min/max/mean 50 metres, exceeding the old cell limit.
+Processing is tiled with temporary disk storage and global polygonization.
+
+The frozen Windows EXE passed its self-test: single DSM values 140 and 160 give
+mean 150 above a strict threshold of 130; drawn AOI, CRS conversion, tile seams,
+exact clipping and GUI mouse drawing/extraction all passed.
+The x64 NSIS installer was installed silently into a workspace test directory.
+All 1114 installed payload files match the tested build by SHA256. The installed
+program passed its self-test from outside the source checkout.
+All Windows wheels match packaging/windows-wheel-hashes.sha256. Official Python
+and Microsoft SDK downloads matched NuGet SHA512 metadata. The SDK C runtime
+was needed for Wine compatibility testing and is not an elevation reference.
+
+No test on native Windows hardware or on the user's real raster data was done.
+Interactive installer pages were not exercised; silent installation was tested.
+No semantic building recognition is claimed. Boundaries follow raster cells;
+touching objects can merge. Shapefile size, disk space and geometry complexity
+still limit practical dataset size.

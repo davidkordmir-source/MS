@@ -1,2 +1,5 @@
 cd33d41b8b1b740f74e67cbea0760390d6e247806c93473471deccfa0b3a9b1e  TerrainStudio-0.3.0-Setup.exe
 97040106f9f691de90c68756e6f972fa00befefcb3efe2fe7a494823fb7d51ea  TerrainStudio-0.3.0-Source.zip
+d1b801bcc76c9e923acc019ecb7e1589c97a71bbb0e81cc3c66da3b0ee1205b7  TerrainStudio-0.4.0-SampleOutput.zip
+4e790797e222741639765230cb2ba8a26de2b92730291354821629bf806bd940  TerrainStudio-0.4.0-Setup.exe
+13ec28f99c8ebfe6d2ee3fb07c1ae53174352a3bebddc2755909e85e5ead4848  TerrainStudio-0.4.0-Source.zip

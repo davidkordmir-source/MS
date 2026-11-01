@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "gis": "single DSM >130; mean 150 from input; drawn AOI; UTM to WGS84; tile seams; exact clipping",
+  "gui": "single DSM; mouse-drawn AOI; preview; threaded extraction; one output dataset verified",
+  "network_required": false,
+  "installer_files_verified": 1114,
+  "version": "0.4.0",
+  "linux_tests": {
+    "passed": 35,
+    "failed": 0
+  },
+  "windows_python_under_wine": {
+    "passed": 35,
+    "failed": 0
+  },
+  "large_raster": {
+    "status": "passed",
+    "pixels": 42250000,
+    "features": 1,
+    "properties": {
+      "obj_id": 1,
+      "elev_min": 50.0,
+      "elev_max": 50.0,
+      "elev_mean": 50.0,
+      "pix_count": 42250000,
+      "z_unit": "m",
+      "h_ref": "DEM"
+    },
+    "seconds": 7.44
+  },
+  "native_windows_tested": false
+}

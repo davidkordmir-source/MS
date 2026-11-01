@@ -18,10 +18,21 @@ if __name__ == '__main__':
             app.processEvents()
             import tempfile
             import time
-            from PySide6.QtCore import QThread
+            from PySide6.QtCore import QThread, QPointF, Qt
+            from PySide6.QtTest import QTest
             with tempfile.TemporaryDirectory() as folder:
                 window.load_sample()
                 window.output.setText(str(Path(folder) / 'gui-output.shp'))
+                window.vector.clear()
+                window.aoi_mode.setCurrentIndex(0)
+                window.canvas.fit_map()
+                window.canvas.begin_area()
+                rect = window.canvas.sceneRect()
+                for x, y in [(.03, .03), (.97, .03), (.97, .97), (.03, .97)]:
+                    point = QPointF(rect.left()+rect.width()*x, rect.top()+rect.height()*y)
+                    QTest.mouseClick(window.canvas.viewport(), Qt.LeftButton, pos=window.canvas.mapFromScene(point))
+                if not window.canvas.finish_area():
+                    raise RuntimeError('Drawing a valid AOI failed')
                 window.start()
                 deadline = time.monotonic() + 45
                 while not window.run_button.isEnabled() and time.monotonic() < deadline:
@@ -34,8 +45,12 @@ if __name__ == '__main__':
                 if not window.open_output.isEnabled() or not window.result_path.exists():
                     raise RuntimeError(window.log.toPlainText())
                 window.grab().save(str(report.with_suffix('.png')))
+                window.map_tabs.setCurrentIndex(1)
+                app.processEvents()
+                window.render_preview()
+                window.grab().save(str(report.with_name(report.stem+'-preview.png')))
             window.close()
-            result["gui"] = "preview, threaded extraction and output verified"
+            result["gui"] = "single DSM; mouse-drawn AOI; preview; threaded extraction; one output dataset verified"
             report.write_text(json.dumps(result, indent=2), encoding='utf-8')
         except Exception:
             report.write_text(json.dumps({'status': 'failed', 'error': traceback.format_exc()}, indent=2), encoding='utf-8')

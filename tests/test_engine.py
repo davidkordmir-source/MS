@@ -133,5 +133,48 @@ class ExtractionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'existing'):
             self.run_filter()
 
+    def test_drawn_polygon_dem_or_dsm_is_the_only_height_reference(self):
+        area = mapping(box(500000, 3999960, 500040, 4000000))
+        for kind in ('dem', 'dsm'):
+            with self.subTest(kind=kind):
+                output = self.root / f'drawn-{kind}.shp'
+                options = Options('', str(self.raster) if kind == 'dem' else '', str(output),
+                                  mode='above', minimum=30, height_kind=kind, unit_scale=1.,
+                                  dsm=str(self.raster) if kind == 'dsm' else '',
+                                  aoi_geometry=area, aoi_crs='EPSG:32639')
+                self.assertEqual(extract(options), 3)
+                with fiona.open(output) as src:
+                    rows = list(src)
+                self.assertEqual([row['properties']['obj_id'] for row in rows], [1, 2, 3])
+                self.assertEqual(sorted(row['properties']['elev_mean'] for row in rows), [55, 90, 100])
+                self.assertTrue(all(row['properties']['h_ref'] == kind.upper() for row in rows))
+
+    def test_tile_seams_do_not_split_objects_or_change_statistics(self):
+        output = self.root / 'tiled.shp'
+        self.assertEqual(extract(Options(str(self.vector), str(self.raster), str(output),
+                                         mode='above', minimum=30, tile_size=2)), 3)
+        with fiona.open(output) as src:
+            rows = list(src)
+        self.assertEqual(sorted(row['properties']['elev_mean'] for row in rows), [55, 90, 100])
+        self.assertEqual(sum(row['properties']['pix_count'] for row in rows), 6)
+
+    def test_disconnected_aoi_parts_get_separate_records_and_heights(self):
+        from shapely.geometry import MultiPolygon
+        # All three cells are connected before exact clipping. The AOI splits them
+        # into two polygons; the middle pixel contributes to both clipped parts.
+        with rasterio.open(self.raster, 'w', driver='GTiff', width=3, height=1, count=1,
+                           dtype='float32', crs='EPSG:32639', transform=from_origin(0, 1, 1, 1)) as dst:
+            dst.write(np.array([[40, 60, 80]], dtype='float32'), 1)
+            dst.set_band_unit(1, 'm')
+        output = self.root/'parts.shp'
+        area = MultiPolygon([box(0, 0, 1.4, 1), box(1.6, 0, 3, 1)])
+        self.assertEqual(extract(Options('', str(self.raster), str(output), mode='above', minimum=30,
+                                         height_kind='dem', tile_size=2, aoi_geometry=mapping(area),
+                                         aoi_crs='EPSG:32639')), 2)
+        with fiona.open(output) as src:
+            rows = list(src)
+        self.assertEqual(sorted(row['properties']['elev_mean'] for row in rows), [50, 70])
+        self.assertTrue(all(row['geometry']['type'] == 'Polygon' for row in rows))
+
 if __name__ == '__main__':
     unittest.main()

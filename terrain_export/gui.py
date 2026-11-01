@@ -14,9 +14,10 @@ from PySide6.QtCore import QThread, Signal, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap, QPainter, QPen, QColor, QPainterPath
 from PySide6.QtWidgets import (QApplication, QWidget, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QPushButton, QFileDialog, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox,
-    QTextEdit, QLabel, QMessageBox, QFrame, QScrollArea, QProgressBar, QSplitter, QSizePolicy)
+    QTextEdit, QLabel, QMessageBox, QFrame, QScrollArea, QProgressBar, QSplitter, QSizePolicy, QTabWidget)
 from terrain_export.engine import Options, extract, CancelledError
 from terrain_export.surface import load_surface, project
+from terrain_export.map_canvas import MapCanvas
 from shapely.geometry import shape
 
 STYLE = '''
@@ -126,9 +127,9 @@ class Window(QWidget):
         super().__init__()
         self.setObjectName('shell')
         self.setStyleSheet(STYLE)
-        self.setWindowTitle('Terrain Studio 0.3.0 | استخراج پلیگون ارتفاعی')
+        self.setWindowTitle('Terrain Studio 0.4.0 | رسم محدوده و استخراج ارتفاع')
         self.setLayoutDirection(Qt.RightToLeft)
-        self.resize(1220, 850)
+        self.resize(1220, 950)
         self.setMinimumSize(980, 700)
         self.worker = None
         self.silent = False
@@ -142,8 +143,10 @@ class Window(QWidget):
         root.setSpacing(14)
         header = QFrame(); header.setObjectName('header')
         hl = QVBoxLayout(header); hl.setContentsMargins(22, 16, 22, 16)
-        hl.addWidget(self.label('Terrain Studio  /  استودیو ارتفاع', 'brand'))
-        hl.addWidget(self.label('۰.۳.۰    •    پردازش محلی و آفلاین    •    خروجی پلیگون با آمار ارتفاع', 'subtitle'))
+        brand_row = QHBoxLayout(); hl.addLayout(brand_row)
+        brand_row.addWidget(self.label('Terrain Studio  /  استودیو ارتفاع', 'brand'), 1)
+        demo = QPushButton('داده نمونه'); demo.clicked.connect(self.load_sample); brand_row.addWidget(demo)
+        hl.addWidget(self.label('۰.۴.۰    •    رستر را انتخاب کنید، محدوده بکشید، یک لایه خروجی بگیرید', 'subtitle'))
         root.addWidget(header)
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
@@ -152,30 +155,32 @@ class Window(QWidget):
         scroll.setWidget(self.controls); splitter.addWidget(scroll)
         c, l = self.card('۱  /  محدوده و داده ارتفاعی'); formroot.addWidget(c)
         form = QFormLayout(); form.setSpacing(10); l.addLayout(form)
-        demo = QPushButton('آزمایش سریع با داده نمونه'); demo.clicked.connect(self.load_sample); l.addWidget(demo)
-        self.vector = self.file_row(form, 'محدوده', 'Shapefile (*.shp)')
-        self.vector_info = self.label('نقطه یا پلیگون انتخاب کنید؛ فایل‌های همراه را کنار SHP نگه دارید.', 'muted'); l.addWidget(self.vector_info)
-        self.radius = self.number(100, .01, 1_000_000); form.addRow('بافر نقاط (متر)', self.radius)
+        self.height_kind = QComboBox(); self.height_kind.addItems(['نوع مدل را انتخاب کنید…', 'ارتفاع ثبت‌شده در DEM', 'ارتفاع ثبت‌شده در DSM'])
+        self.height_kind.setCurrentIndex(1); form.addRow('نوع مدل ورودی', self.height_kind)
+        self.raster = self.file_row(form, 'فایل DEM یا DSM', 'Raster (*.tif *.tiff *.img *.asc);;All files (*)')
+        self.band = QSpinBox(); self.band.setRange(1, 999); form.addRow('باند ارتفاع', self.band)
+        self.unit = QComboBox(); self.unit.addItems(['واحد فایل فاقد متادیتا را انتخاب کنید…', 'متر', 'فوت']); form.addRow('واحد ارتفاع نامشخص', self.unit)
+        self.aoi_mode = QComboBox(); self.aoi_mode.addItems(['رسم محدوده روی نقشه', 'شیپ‌فایل محدوده آماده'])
+        form.addRow('انتخاب محدوده', self.aoi_mode)
+        self.vector_controls = QWidget(); vector_form = QFormLayout(self.vector_controls); vector_form.setContentsMargins(0, 0, 0, 0)
+        self.vector = self.file_row(vector_form, 'محدوده آماده', 'Shapefile (*.shp)')
+        self.radius = self.number(100, .01, 1_000_000); vector_form.addRow('بافر نقاط (متر)', self.radius)
         self.crs_override = QLineEdit(); self.crs_override.setPlaceholderText('فقط برای لایه بدون CRS؛ برای جابه‌جایی مختصات استفاده نکنید')
-        self.crs_override.setLayoutDirection(Qt.LeftToRight); form.addRow('CRS جایگزین', self.crs_override)
-        self.raster = self.file_row(form, 'فایل DEM', 'Raster (*.tif *.tiff *.img *.asc);;All files (*)')
-        self.band = QSpinBox(); self.band.setRange(1, 999); form.addRow('باند DEM', self.band)
-        self.dsm = self.file_row(form, 'فایل DSM', 'Raster (*.tif *.tiff *.img *.asc);;All files (*)')
-        self.dsm_band = QSpinBox(); self.dsm_band.setRange(1, 999); form.addRow('باند DSM', self.dsm_band)
+        self.crs_override.setLayoutDirection(Qt.LeftToRight); vector_form.addRow('CRS جایگزین', self.crs_override)
+        l.addWidget(self.vector_controls); self.vector_controls.setVisible(False)
+        self.vector_info = self.label('پس از انتخاب رستر، در برگه نقشه محدوده را رسم کنید.', 'muted'); l.addWidget(self.vector_info)
         self.raster_info = self.label('اندازه، مختصات و نمونه ارتفاع پس از انتخاب فایل نمایش داده می‌شود.', 'muted'); l.addWidget(self.raster_info)
         c, l = self.card('۲  /  شرط ارتفاع و خروجی'); formroot.addWidget(c)
         form = QFormLayout(); form.setSpacing(10); l.addLayout(form)
-        self.height_kind = QComboBox(); self.height_kind.addItems(['مبنای ارتفاع را انتخاب کنید…', 'مقدار ارتفاع DEM', 'مقدار ارتفاع DSM', 'ارتفاع از زمین: DSM − DEM'])
-        form.addRow('منبع شرط ارتفاع', self.height_kind)
-        self.unit = QComboBox(); self.unit.addItems(['واحد داده فاقد متادیتا را انتخاب کنید…', 'متر', 'فوت'])
-        form.addRow('واحد ارتفاع نامشخص', self.unit)
         self.refresh = QPushButton('بررسی محدوده و پیش‌نمایش واقعی'); self.refresh.clicked.connect(self.inspect_raster); l.addWidget(self.refresh)
-        self.mode = QComboBox(); self.mode.addItems(['بین دو ارتفاع • شامل مرزها', 'بیشتر از حد پایین', 'کمتر از حد بالا'])
+        self.mode = QComboBox(); self.mode.addItems(['بین دو ارتفاع • شامل مرزها', 'بیشتر از حد پایین', 'کمتر از حد بالا']); self.mode.setCurrentIndex(1)
         form.addRow('نوع شرط', self.mode)
         self.minimum = self.number(30); self.maximum = self.number(100)
         form.addRow('حد پایین', self.minimum); form.addRow('حد بالا', self.maximum)
+        self.filter_form = form
         self.output = self.file_row(form, 'فایل خروجی', 'Shapefile (*.shp)', True)
-        l.addWidget(self.label('آستانه‌ها به متر هستند. در حالت اختلاف، DEM و DSM باید مرجع عمودی یکسان داشته باشند. مختصات خروجی عین CRS پلیگون ورودی است.', 'muted'))
+        l.addWidget(self.label('مرجع ارتفاع فقط همین فایل انتخابی است. شرط و آمار خروجی به متر هستند؛ هیچ ارتفاع زمین یا فایل دیگری از آن کم نمی‌شود.', 'muted'))
+        l.addWidget(self.label('هر ناحیه جدا یک پلیگون و یک ردیف با حداقل، حداکثر و میانگین ارتفاع دارد؛ همه در یک لایه ذخیره می‌شوند. دقت مرز تابع اندازه پیکسل است و اجسام چسبیده لزوماً جدا نمی‌شوند.', 'muted'))
         c, l = self.card('۳  /  تنظیمات پردازش'); formroot.addWidget(c)
         form = QFormLayout(); l.addLayout(form)
         self.workers = QSpinBox(); self.workers.setRange(1, min(256, os.cpu_count() or 1)); self.workers.setValue(min(32, os.cpu_count() or 1))
@@ -183,18 +188,32 @@ class Window(QWidget):
         self.gpu = QCheckBox('CUDA اختیاری — در این نصاب موجود نیست'); self.gpu.setEnabled(False); form.addRow(self.gpu)
         formroot.addStretch()
         right = QWidget(); rightlayout = QVBoxLayout(right); rightlayout.setContentsMargins(10, 0, 0, 0)
-        splitter.addWidget(right); splitter.setSizes([520, 650])
-        c, l = self.card('پیش‌نمایش ارتفاع'); rightlayout.addWidget(c, 3)
+        right_scroll = QScrollArea(); right_scroll.setWidgetResizable(True); right_scroll.setWidget(right)
+        splitter.addWidget(right_scroll); splitter.setSizes([520, 650])
+        c, l = self.card('نقشه و پیش‌نمایش'); c.setMinimumHeight(400); rightlayout.addWidget(c, 3)
+        self.map_tabs = QTabWidget(); self.map_tabs.setMinimumHeight(310); l.addWidget(self.map_tabs, 1)
+        map_page = QWidget(); map_layout = QVBoxLayout(map_page); map_layout.setContentsMargins(0, 8, 0, 0)
+        self.canvas = MapCanvas(); map_layout.addWidget(self.canvas, 1)
+        self.map_tools = QWidget(); map_actions = QHBoxLayout(self.map_tools); map_actions.setContentsMargins(0, 0, 0, 0); map_layout.addWidget(self.map_tools)
+        self.draw_button = QPushButton('رسم محدوده'); self.draw_button.clicked.connect(self.canvas.begin_area); map_actions.addWidget(self.draw_button)
+        self.finish_draw = QPushButton('پایان رسم'); self.finish_draw.clicked.connect(self.canvas.finish_area); map_actions.addWidget(self.finish_draw)
+        clear_draw = QPushButton('پاک‌کردن'); clear_draw.clicked.connect(self.canvas.clear_area); map_actions.addWidget(clear_draw)
+        fit_map = QPushButton('نمای کامل'); fit_map.clicked.connect(self.canvas.fit_map); map_actions.addWidget(fit_map)
+        self.map_hint = self.label('فایل ارتفاعی را انتخاب کنید؛ زوم با چرخ ماوس، جابه‌جایی با کشیدن نقشه.', 'muted'); map_layout.addWidget(self.map_hint)
+        self.canvas.notice.connect(self.map_hint.setText)
+        self.map_tabs.addTab(map_page, 'رسم محدوده')
         self.preview = QLabel('DEM/DSM را انتخاب کنید\n\nپیش‌نمایش نمونه‌برداری‌شده از رستر اینجا نمایش داده می‌شود.')
         self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumSize(300, 150)
-        self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.preview.setStyleSheet('background: #102c40; color: #95bbca; border-radius: 10px;')
-        l.addWidget(self.preview, 1)
-        self.preview_note = self.label('مرز زرد: پلیگون شما | فیروزه‌ای: ارتفاع‌های منطبق\nپیش‌نمایش از محدوده خودتان است؛ مرز خروجی دقیقاً به پلیگون برش می‌خورد.', 'muted'); self.preview_note.setMinimumHeight(48); l.addWidget(self.preview_note)
+        preview_page = QWidget(); preview_layout = QVBoxLayout(preview_page); preview_layout.addWidget(self.preview, 1)
+        self.preview_note = self.label('مرز زرد: پلیگون شما | فیروزه‌ای: ارتفاع‌های منطبق\nپیش‌نمایش از محدوده خودتان است؛ مرز خروجی دقیقاً به پلیگون برش می‌خورد.', 'muted'); self.preview_note.setMinimumHeight(48); preview_layout.addWidget(self.preview_note)
+        self.map_tabs.addTab(preview_page, 'پیش‌نمایش شرط ارتفاع')
         c, l = self.card('وضعیت و گزارش'); rightlayout.addWidget(c, 2)
         self.status = self.label('آماده • فایل‌ها را انتخاب کنید', 'status'); l.addWidget(self.status)
         self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setValue(0); self.progress.setTextVisible(False); l.addWidget(self.progress)
-        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLayoutDirection(Qt.LeftToRight); l.addWidget(self.log, 1)
+        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLayoutDirection(Qt.LeftToRight)
+        self.log.setMinimumHeight(40); self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored); l.addWidget(self.log, 1)
         actions = QHBoxLayout(); l.addLayout(actions)
         self.open_output = QPushButton('پوشه خروجی'); self.open_output.setEnabled(False); self.open_output.clicked.connect(self.open_folder); actions.addWidget(self.open_output)
         log_button = QPushButton('ذخیره گزارش'); log_button.clicked.connect(self.save_log); actions.addWidget(log_button)
@@ -202,16 +221,18 @@ class Window(QWidget):
         self.run_button = QPushButton('شروع استخراج پلیگون  ←'); self.run_button.setObjectName('primary'); self.run_button.clicked.connect(self.start); bottom.addWidget(self.run_button, 1)
         self.cancel_button = QPushButton('لغو پردازش'); self.cancel_button.setEnabled(False); self.cancel_button.clicked.connect(self.cancel); bottom.addWidget(self.cancel_button)
         self.vector.editingFinished.connect(self.inspect_vector)
+        self.aoi_mode.currentIndexChanged.connect(lambda index: self.vector_controls.setVisible(index == 1))
+        self.aoi_mode.currentIndexChanged.connect(self.inspect_raster)
+        self.canvas.area_changed.connect(self.inspect_raster)
         self.raster.editingFinished.connect(self.inspect_raster)
         self.band.valueChanged.connect(self.inspect_raster)
-        self.dsm.editingFinished.connect(self.inspect_raster)
-        self.dsm_band.valueChanged.connect(self.inspect_raster)
         self.radius.valueChanged.connect(self.inspect_raster)
         self.height_kind.currentIndexChanged.connect(self.inspect_raster)
         self.unit.currentIndexChanged.connect(self.inspect_raster)
         self.crs_override.editingFinished.connect(self.inspect_raster)
         self.mode.currentIndexChanged.connect(self.update_limits)
         self.minimum.valueChanged.connect(self.render_preview); self.maximum.valueChanged.connect(self.render_preview)
+        self.update_limits()
     def label(self, text, name):
         label = QLabel(text); label.setObjectName(name); label.setWordWrap(True); return label
     def card(self, title):
@@ -236,46 +257,92 @@ class Window(QWidget):
                 self.radius.setEnabled('Point' in kind)
                 self.crs_override.setEnabled(not bool(src.crs))
                 if src.crs: self.crs_override.clear()
+            self.aoi_mode.setCurrentIndex(1)
             if not self.output.text():
                 self.output.setText(str(Path(self.vector.text()).with_name(Path(self.vector.text()).stem + '_polygons.shp')))
             if hasattr(self, 'height_kind'): self.inspect_raster()
         except Exception as exc:
-            self.vector_info.setText('خواندن لایه ممکن نشد؛ مسیر و فایل‌های جانبی را بررسی کنید.'); self.log.append(str(exc))
+            message = 'خواندن لایه ممکن نشد؛ مسیر و فایل‌های جانبی را بررسی کنید.'
+            self.vector_info.setText(message); self.log.append(str(exc))
+            self.reset_preview(message)
     def options(self):
         return Options(vector=self.vector.text().strip(), raster=self.raster.text().strip(), output=self.output.text().strip(),
             mode=['between', 'above', 'below'][self.mode.currentIndex()], minimum=self.minimum.value(), maximum=self.maximum.value(),
             radius=self.radius.value(), workers=self.workers.value(), band=self.band.value(), vector_crs=self.crs_override.text().strip(),
-            dsm=self.dsm.text().strip(), dsm_band=self.dsm_band.value(),
-            height_kind=['', 'dem', 'dsm', 'relative'][self.height_kind.currentIndex()],
-            unit_scale=[None, 1., .3048][self.unit.currentIndex()])
+            dsm=self.raster.text().strip() if self.height_kind.currentIndex() == 2 else '', dsm_band=self.band.value(),
+            height_kind=['', 'dem', 'dsm'][self.height_kind.currentIndex()],
+            unit_scale=[None, 1., .3048][self.unit.currentIndex()],
+            aoi_geometry=self.canvas.area_geometry() if self.aoi_mode.currentIndex() == 0 else None,
+            aoi_crs=str(self.canvas.crs) if self.canvas.crs is not None else '')
+    def refresh_map(self):
+        path, band = self.raster.text().strip(), self.band.value()
+        if not path:
+            if self.canvas.raster_key is not None: self.canvas.reset_raster()
+            return
+        stat = Path(path).stat()
+        key = (str(Path(path).resolve()), band, stat.st_mtime_ns, stat.st_size)
+        if key == self.canvas.raster_key: return
+        with rasterio.open(path) as src:
+            if not src.crs: raise ValueError('Raster CRS is missing.')
+            if not 1 <= band <= src.count: raise ValueError('Selected raster band is unavailable.')
+            ratio = min(1., 1000 / max(src.height, src.width))
+            height, width = max(1, round(src.height*ratio)), max(1, round(src.width*ratio))
+            values = src.read(band, out_shape=(height, width), masked=True, resampling=Resampling.nearest).astype('float64').filled(np.nan)
+            from affine import Affine
+            affine = src.transform * Affine.scale(src.width/width, src.height/height)
+            self.canvas.set_raster(values, affine, src.crs, key)
+            self.map_hint.setText(f'اندازه پیکسل: {abs(src.transform.a):g} × {abs(src.transform.e):g} در واحد CRS • {src.crs} • «رسم محدوده» را بزنید.')
+        if not self.output.text():
+            self.output.setText(str(Path(path).with_name(Path(path).stem + '_polygons.shp')))
+    def reset_preview(self, message):
+        self.sample = None
+        self.preview_geometry = None
+        self.preview_affine = None
+        self.preview_crs = None
+        self.preview.clear()
+        self.preview.setText(message)
+        self.raster_info.setText('پس از انتخاب ورودی‌های معتبر، اطلاعات ارتفاع و مختصات نمایش داده می‌شود.')
     def inspect_raster(self):
         if not hasattr(self, 'height_kind'): return
-        if not self.vector.text() or self.height_kind.currentIndex() == 0:
-            self.preview.clear(); self.preview.setText('پلیگون و مبنای ارتفاع را انتخاب کنید.'); return
+        try:
+            self.refresh_map()
+        except Exception as exc:
+            if self.canvas.raster_key is not None: self.canvas.reset_raster()
+            self.map_hint.setText(friendly_error(exc))
+            self.reset_preview(friendly_error(exc))
+            return
+        drawn = self.aoi_mode.currentIndex() == 0
+        if (drawn and self.canvas.area_geometry() is None) or (not drawn and not self.vector.text()) or self.height_kind.currentIndex() == 0:
+            self.reset_preview('محدوده و مبنای ارتفاع را انتخاب کنید.'); return
         try:
             o = self.options()
             self.sample, self.preview_affine, self.preview_crs, original, crs, self.preview_geometry, metadata = load_surface(o, max_side=600)
             from pyproj import CRS
             center = project(original, crs, CRS.from_epsg(4326)).representative_point()
-            self.raster_info.setText(f"منبع: {metadata['reference']}  •  واحد خروجی: {metadata['z_unit']}\nCRS خروجی: {metadata['output_crs']}\nمرکز محدوده: طول {center.x:.6f} / عرض {center.y:.6f}")
+            self.raster_info.setText(f"منبع: {metadata['reference']}  •  واحد خروجی: {metadata['z_unit']}  •  {metadata['output_crs']}")
+            self.raster_info.setToolTip(f'مرکز محدوده: طول {center.x:.6f} / عرض {center.y:.6f}')
             self.render_preview()
+            if drawn: self.vector_info.setText('محدوده روی نقشه ثبت شد؛ خروجی در CRS همین رستر خواهد بود.')
         except Exception as exc:
-            self.sample = None; self.preview.clear(); self.preview.setText(friendly_error(exc)); self.raster_info.setText(str(exc))
+            self.reset_preview(friendly_error(exc)); self.raster_info.setText(str(exc))
     def load_sample(self):
         folder = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent)) / 'examples'
         self.vector.setText(str(folder / 'demo_area.shp')); self.inspect_vector()
-        self.raster.setText(str(folder / 'demo_dem.tif'))
-        self.dsm.setText(str(folder / 'demo_dsm.tif'))
-        self.unit.setCurrentIndex(1); self.height_kind.setCurrentIndex(3); self.inspect_raster()
+        self.raster.setText(str(folder / 'demo_dsm.tif'))
+        self.unit.setCurrentIndex(1); self.height_kind.setCurrentIndex(2); self.inspect_raster()
         self.output.setText(str(Path(tempfile.gettempdir()) / 'TerrainStudio-demo' / 'result.shp'))
-        self.mode.setCurrentIndex(1); self.minimum.setValue(30); self.maximum.setValue(100)
-        self.status.setText('نمونه مصنوعی: DEM + DSM • اختلاف بالای ۳۰ متر • شروع استخراج را بزنید.')
+        self.mode.setCurrentIndex(1); self.minimum.setValue(180); self.maximum.setValue(250)
+        self.status.setText('نمونه مصنوعی: ارتفاع ثبت‌شده در DSM بالای ۱۸۰ متر • شروع استخراج را بزنید.')
     def update_limits(self):
-        self.minimum.setEnabled(self.mode.currentIndex() != 2); self.maximum.setEnabled(self.mode.currentIndex() != 1); self.render_preview()
+        self.minimum.setEnabled(self.mode.currentIndex() != 2); self.maximum.setEnabled(self.mode.currentIndex() != 1)
+        self.filter_form.setRowVisible(self.minimum, self.mode.currentIndex() != 2)
+        self.filter_form.setRowVisible(self.maximum, self.mode.currentIndex() != 1)
+        self.render_preview()
     def render_preview(self):
         if self.sample is None: return
         z = self.sample; valid = np.isfinite(z)
-        if not valid.any(): return
+        if not valid.any():
+            self.preview.clear(); self.preview.setText('در محدوده انتخابی، داده ارتفاعی معتبر وجود ندارد.'); return
         low, high = np.percentile(z[valid], [2, 98]); norm = np.clip((np.nan_to_num(z, nan=low) - low) / max(high-low, .001), 0, 1)
         rgb = np.stack([35+norm*173, 61+norm*162, 73+norm*130], axis=-1).astype('uint8')
         selected = valid.copy(); mode = self.mode.currentIndex()
@@ -302,9 +369,13 @@ class Window(QWidget):
     def start(self):
         o = self.options()
         if not o.height_kind:
-            QMessageBox.warning(self, 'مبنای ارتفاع', 'انتخاب کنید شرط روی DEM، DSM یا اختلاف DSM−DEM اعمال شود.'); return
-        if not all((o.vector, o.raster, o.output)):
-            QMessageBox.warning(self, 'ورودی ناقص', 'محدوده، رستر و مسیر خروجی را انتخاب کنید.'); return
+            QMessageBox.warning(self, 'نوع مدل', 'نوع فایل ورودی را DEM یا DSM انتخاب کنید.'); return
+        if self.aoi_mode.currentIndex() == 0 and o.aoi_geometry is None:
+            QMessageBox.warning(self, 'محدوده مشخص نیست', 'روی نقشه محدوده را رسم و «پایان رسم» را بزنید.'); return
+        if not o.output or (self.aoi_mode.currentIndex() == 1 and not o.vector):
+            QMessageBox.warning(self, 'ورودی ناقص', 'محدوده و مسیر خروجی را انتخاب کنید.'); return
+        if not o.raster:
+            QMessageBox.warning(self, 'ورودی ناقص', 'فایل DEM یا DSM را انتخاب کنید.'); return
         if o.mode == 'between' and o.minimum > o.maximum:
             QMessageBox.warning(self, 'بازه نامعتبر', 'حد پایین نباید از حد بالا بیشتر باشد.'); return
         if not o.output.lower().endswith('.shp'): o.output += '.shp'
@@ -313,6 +384,7 @@ class Window(QWidget):
             o.output = str(original.with_name(f'{original.stem}_{index}.shp')); index += 1
         self.output.setText(o.output); self.result_path = Path(o.output)
         self.controls.setEnabled(False); self.run_button.setEnabled(False); self.cancel_button.setEnabled(True); self.open_output.setEnabled(False)
+        self.canvas.setEnabled(False); self.map_tools.setEnabled(False)
         self.progress.setRange(0, 0); self.status.setText('در حال پردازش…'); self.log.clear(); self.log.append('Output: ' + o.output)
         self.worker = Worker(o, self); self.worker.message.connect(self.show_progress); self.worker.result.connect(self.done); self.worker.finished.connect(self.finished); self.worker.start()
     def show_progress(self, message):
@@ -328,6 +400,7 @@ class Window(QWidget):
         self.worker = None
         if worker: worker.deleteLater()
         self.controls.setEnabled(True); self.update_limits(); self.run_button.setEnabled(True); self.cancel_button.setEnabled(False)
+        self.canvas.setEnabled(True); self.map_tools.setEnabled(True)
     def cancel(self):
         if self.worker: self.worker.cancelled.set(); self.cancel_button.setEnabled(False); self.status.setText('درخواست لغو ثبت شد؛ منتظر پایان مرحله جاری…')
     def open_folder(self):

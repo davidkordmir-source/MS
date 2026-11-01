@@ -21,7 +21,19 @@ def project(geometry, source, target):
     return transform(Transformer.from_crs(source, target, always_xy=True, allow_ballpark=False, only_best=True).transform, geometry)
 
 
-def read_aoi(path, radius, crs_override=''):
+def read_aoi(path, radius, crs_override='', geometry=None, geometry_crs=''):
+    if geometry is not None:
+        if not geometry_crs:
+            raise ValueError('Drawn area must have a defined CRS.')
+        aoi = shape(geometry)
+        if aoi.geom_type not in {'Polygon', 'MultiPolygon'} or aoi.is_empty or not aoi.is_valid or aoi.area <= 0:
+            raise ValueError('Drawn area contains invalid geometry. Draw a polygon without crossing edges.')
+        crs = CRS(geometry_crs)
+        if crs.is_geographic:
+            x0, y0, x1, y1 = aoi.bounds
+            if not (-180 <= x0 <= x1 <= 180 and -90 <= y0 <= y1 <= 90):
+                raise ValueError('Geographic coordinates are outside longitude/latitude limits. Check the source CRS.')
+        return aoi, crs
     if not Path(path).is_file():
         raise ValueError('Vector file does not exist.')
     with fiona.open(path) as src:
@@ -65,7 +77,7 @@ def factor(dataset, band, fallback, strict):
     return 1., unit or 'unknown'
 
 
-def load_surface(o, progress=lambda message: None, max_side=None):
+def load_surface(o, progress=lambda message: None, max_side=None, tile_window=None):
     """Reference grid is DEM for DEM mode, DSM for DSM or DSM−DEM mode. No CRS guessing."""
     kind = o.height_kind
     if kind not in {'absolute', 'dem', 'dsm', 'relative'}:
@@ -74,7 +86,7 @@ def load_surface(o, progress=lambda message: None, max_side=None):
         raise ValueError('DSM file is required for the selected elevation reference.')
     if o.unit_scale is not None and o.unit_scale not in {1., .3048}:
         raise ValueError('Unsupported vertical unit conversion.')
-    original_aoi, vector_crs = read_aoi(o.vector, o.radius, o.vector_crs)
+    original_aoi, vector_crs = read_aoi(o.vector, o.radius, o.vector_crs, o.aoi_geometry, o.aoi_crs)
     path = o.dsm if kind in {'dsm', 'relative'} else o.raster
     band = o.dsm_band if kind in {'dsm', 'relative'} else o.band
     with rasterio.Env(GDAL_NUM_THREADS=str(o.workers)):
@@ -92,6 +104,9 @@ def load_surface(o, progress=lambda message: None, max_side=None):
             if not aoi.intersects(box(*src.bounds)) or aoi.intersection(box(*src.bounds)).area == 0:
                 raise ValueError('Vector and raster do not overlap. Check their CRS.')
             window = geometry_window(src, [mapping(aoi)])
+            processing_window = window
+            if tile_window is not None:
+                window = window.intersection(tile_window)
             height, width = int(window.height), int(window.width)
             if max_side:
                 ratio = min(1., max_side / max(height, width))
@@ -124,6 +139,9 @@ def load_surface(o, progress=lambda message: None, max_side=None):
             metadata = {'reference': {'absolute':'raster', 'dem':'DEM', 'dsm':'DSM', 'relative':'DSM-DEM'}[kind],
                         'raster_crs': str(src.crs), 'dem_crs': dem_crs, 'output_crs': vector_crs.to_string(),
                         'z_unit': unit, 'valid_pixels': int(np.isfinite(values).sum()),
-                        'requested_bounds': list(original_aoi.bounds)}
+                        'requested_bounds': list(original_aoi.bounds),
+                        'processing_window': [processing_window.col_off, processing_window.row_off, processing_window.width, processing_window.height],
+                        'processing_transform': list(src.window_transform(processing_window))[:6],
+                        'aoi_source': 'drawn' if o.aoi_geometry is not None else 'vector'}
             progress(f"Height: {metadata['reference']} | raster CRS: {src.crs} | output CRS: {vector_crs.to_string()} | {unit}")
             return values, affine, src.crs, original_aoi, vector_crs, aoi, metadata
