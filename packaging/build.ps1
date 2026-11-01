@@ -6,13 +6,18 @@ if ($LASTEXITCODE) { throw 'Python 3.12 is required' }
 if ($LASTEXITCODE) { throw 'Dependency installation failed' }
 & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 if ($LASTEXITCODE) { throw 'Tests failed' }
-& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --name TerrainPolygon --collect-all rasterio --collect-all fiona --collect-all pyproj --collect-all shapely --add-data "examples;examples" run_app.py
+& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --name TerrainPolygon --icon assets/terrain-studio.ico --version-file packaging/version_info.txt --collect-all rasterio --collect-all fiona --collect-all pyproj --collect-all shapely --collect-all pyopencl --add-data "examples;examples" --add-data "assets;assets" run_app.py
 if ($LASTEXITCODE) { throw 'Packaging failed' }
 $report = Join-Path (Get-Location) 'build/selftest.json'
 if (Test-Path $report) { Remove-Item $report }
 $smoke = Start-Process -FilePath .\dist\TerrainPolygon\TerrainPolygon.exe -ArgumentList @('--self-test', ('"' + $report + '"')) -Wait -PassThru
 if ($smoke.ExitCode -ne 0 -or !(Test-Path $report)) { throw 'Packaged functional test failed' }
 if ((Get-Content $report -Raw | ConvertFrom-Json).status -ne 'passed') { throw 'Packaged functional test failed' }
+$startupReport = Join-Path (Get-Location) 'build/startup-selftest.json'
+if (Test-Path $startupReport) { Remove-Item $startupReport }
+$startup = Start-Process -FilePath .\dist\TerrainPolygon\TerrainPolygon.exe -ArgumentList @('--startup-test', ('"' + $startupReport + '"')) -Wait -PassThru
+if ($startup.ExitCode -ne 0 -or !(Test-Path $startupReport)) { throw 'Startup test failed' }
+if ((Get-Content $startupReport -Raw | ConvertFrom-Json).status -ne 'passed') { throw 'Startup test failed' }
 & .\.venv\Scripts\python.exe packaging/collect_notices.py
 if ($LASTEXITCODE) { throw 'License collection failed' }
 & .\.venv\Scripts\python.exe packaging/prepare_nsis.py

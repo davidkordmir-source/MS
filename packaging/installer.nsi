@@ -1,18 +1,20 @@
 Unicode true
 Target amd64-unicode
+Icon "../assets/terrain-studio.ico"
+UninstallIcon "../assets/terrain-studio.ico"
 !include "MUI2.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
-Name "Terrain Studio 0.4.0"
-OutFile "../dist/installer/TerrainStudio-0.4.0-Setup.exe"
+Name "Terrain Studio 0.5.0"
+OutFile "../dist/installer/TerrainStudio-0.5.0-Setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\TerrainPolygon"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 SetCompressorDictSize 8
-VIProductVersion "0.4.0.0"
+VIProductVersion "0.5.0.0"
 VIAddVersionKey "ProductName" "Terrain Studio"
 VIAddVersionKey "FileDescription" "Offline Terrain Polygon Export Installer"
-VIAddVersionKey "FileVersion" "0.4.0"
+VIAddVersionKey "FileVersion" "0.5.0"
 VIAddVersionKey "LegalCopyright" "Terrain Polygon Export contributors"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\TerrainPolygon.exe"
@@ -41,15 +43,18 @@ Section "Application"
   File /r "../dist/TerrainPolygon/*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\Terrain Polygon Export"
-  CreateShortcut "$SMPROGRAMS\Terrain Polygon Export\Terrain Polygon Export.lnk" "$INSTDIR\TerrainPolygon.exe"
+  Delete "$SMPROGRAMS\Terrain Polygon Export\Terrain Polygon Export.lnk"
+  CreateShortcut "$SMPROGRAMS\Terrain Polygon Export\Terrain Studio.lnk" "$INSTDIR\TerrainPolygon.exe"
   CreateShortcut "$SMPROGRAMS\Terrain Polygon Export\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\Terrain Polygon Export.lnk" "$INSTDIR\TerrainPolygon.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "DisplayName" "Terrain Studio 0.4.0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "DisplayVersion" "0.4.0"
+  Delete "$DESKTOP\Terrain Polygon Export.lnk"
+  CreateShortcut "$DESKTOP\Terrain Studio.lnk" "$INSTDIR\TerrainPolygon.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "DisplayName" "Terrain Studio 0.5.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "DisplayVersion" "0.5.0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "DisplayIcon" "$INSTDIR\TerrainPolygon.exe"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon" "NoRepair" 1
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
 Section "Uninstall"
@@ -58,8 +63,8 @@ Section "Uninstall"
   !include "uninstall-files.nsh"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
-  Delete "$DESKTOP\Terrain Polygon Export.lnk"
-  Delete "$SMPROGRAMS\Terrain Polygon Export\Terrain Polygon Export.lnk"
+  Delete "$DESKTOP\Terrain Studio.lnk"
+  Delete "$SMPROGRAMS\Terrain Polygon Export\Terrain Studio.lnk"
   Delete "$SMPROGRAMS\Terrain Polygon Export\Uninstall.lnk"
   RMDir "$SMPROGRAMS\Terrain Polygon Export"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\TerrainPolygon"

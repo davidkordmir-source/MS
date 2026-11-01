@@ -1,5 +1,7 @@
 """Bounded raster processing with global polygonization across tile boundaries."""
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from dataclasses import replace
 from pathlib import Path
 import itertools
 import json
@@ -15,6 +17,7 @@ from rasterio.windows import Window, from_bounds
 from shapely import box, intersection, area as geometry_area
 from shapely.geometry import shape, mapping
 from terrain_export.surface import load_surface, project
+from terrain_export.acceleration import ThresholdAccelerator, cpu_threshold
 
 
 def polygon_parts(geometry):
@@ -33,13 +36,25 @@ def windows(width, height, side, col=0, row=0):
 
 
 def threshold(values, options):
-    selected = np.isfinite(values)
-    if options.mode in ('between', 'above'):
-        selected &= values >= options.minimum if options.mode == 'between' else values > options.minimum
-    if options.mode in ('between', 'below'):
-        selected &= values <= options.maximum if options.mode == 'between' else values < options.maximum
-    return selected
+    return cpu_threshold(values, options)
 
+
+def read_tiles(options, width, height, col, row):
+    readers = min(4, options.workers)
+    jobs = iter(windows(width, height, options.tile_size, col, row))
+    read_options = replace(options, workers=max(1, options.workers//readers))
+    with ThreadPoolExecutor(max_workers=readers) as pool:
+        pending = deque()
+        def submit():
+            win = next(jobs, None)
+            if win is not None:
+                pending.append((win, pool.submit(load_surface, read_options, tile_window=win)))
+        for _ in range(readers): submit()
+        while pending:
+            win, future = pending.popleft()
+            values, *_ = future.result()
+            submit()
+            yield win, values
 
 def extract(o, progress=lambda message: None, cancelled=lambda: False):
     from terrain_export.engine import CancelledError
@@ -71,17 +86,7 @@ def extract(o, progress=lambda message: None, cancelled=lambda: False):
     _, _, crs, original_aoi, vector_crs, aoi, metadata = load_surface(o, max_side=1)
     col, row, width, height = map(int, metadata['processing_window'])
     affine = Affine(*metadata['processing_transform'])
-    backend = 'CPU'
-    cupy = None
-    if o.gpu:
-        try:
-            import cupy
-            if cupy.cuda.runtime.getDeviceCount() < 1:
-                raise RuntimeError('No CUDA device')
-        except Exception as exc:
-            cupy = None
-            progress(f'GPU unavailable ({type(exc).__name__}); using CPU.')
-
+    accelerator = ThresholdAccelerator(o, progress)
     # Only completed output sidecars are published. Raster caches stay in work/.
     with rasterio.Env(GDAL_CACHEMAX=64*1024*1024), tempfile.TemporaryDirectory(dir=out.parent) as staging:
         stage = Path(staging)
@@ -93,26 +98,9 @@ def extract(o, progress=lambda message: None, cancelled=lambda: False):
         total_tiles = math.ceil(width/o.tile_size)*math.ceil(height/o.tile_size)
         with rasterio.open(z_path, 'w', dtype='float64', nodata=np.nan, **profile) as z_dst, \
              rasterio.open(mask_path, 'w', dtype='uint8', nodata=0, **profile) as mask_dst:
-            for i, win in enumerate(windows(width, height, o.tile_size, col, row), 1):
+            for i, (win, values) in enumerate(read_tiles(o, width, height, col, row), 1):
                 check_cancel()
-                values, *_ = load_surface(o, tile_window=win)
-                selected = None
-                if cupy is not None:
-                    try:
-                        v = cupy.asarray(values)
-                        selected = cupy.isfinite(v)
-                        if o.mode in ('between', 'above'):
-                            selected &= v >= o.minimum if o.mode == 'between' else v > o.minimum
-                        if o.mode in ('between', 'below'):
-                            selected &= v <= o.maximum if o.mode == 'between' else v < o.maximum
-                        selected = cupy.asnumpy(selected)
-                        del v
-                        backend = 'CUDA'
-                    except Exception as exc:
-                        cupy = None
-                        progress(f'GPU unavailable ({type(exc).__name__}); using CPU.')
-                if selected is None:
-                    selected = threshold(values, o)
+                selected = accelerator.apply(values)
                 local = Window(win.col_off-col, win.row_off-row, win.width, win.height)
                 z_dst.write(values, 1, window=local)
                 mask_dst.write(selected.astype('uint8'), 1, window=local)
@@ -168,7 +156,7 @@ def extract(o, progress=lambda message: None, cancelled=lambda: False):
                   'elev_max': 'float:24.8', 'elev_mean': 'float:24.8', 'pix_count': 'int:18',
                   'z_unit': 'str:40', 'h_ref': 'str:16'}}
         temp = stage/out.name
-        progress(f'Creating connected polygons ({backend}); calculating statistics…')
+        progress(f'Creating connected polygons ({accelerator.backend}); calculating statistics…')
         count = 0
         with rasterio.open(mask_path) as mask_src, \
              fiona.open(temp, 'w', driver='ESRI Shapefile', crs_wkt=vector_crs.to_wkt(version='WKT1_ESRI'),
@@ -199,7 +187,7 @@ def extract(o, progress=lambda message: None, cancelled=lambda: False):
                         feature_count=count, output_wkt=vector_crs.to_wkt(), valid_pixels=valid_count,
                         boundary='Exact intersection with AOI; separate 4-connected selected regions',
                         dem_or_raster=o.raster, dsm=o.dsm, processing='tiled; global polygonization',
-                        tile_size=o.tile_size)
+                        tile_size=o.tile_size, backend=accelerator.backend)
         temp.with_suffix('.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
         check_cancel()
         published = []
@@ -214,5 +202,5 @@ def extract(o, progress=lambda message: None, cancelled=lambda: False):
         except Exception:
             for file in published: file.unlink()
             raise
-    progress(f'Completed: {count} polygons; filter backend: {backend}.')
+    progress(f'Completed: {count} polygons; filter backend: {accelerator.backend}.')
     return count

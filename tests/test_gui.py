@@ -46,6 +46,8 @@ class GuiIntegrationTests(unittest.TestCase):
             self.assertTrue(window.run_button.isEnabled(), 'GUI worker did not finish')
             self.assertTrue(window.open_output.isEnabled(), window.log.toPlainText())
             self.assertTrue(window.result_path.exists())
+            while window.progress.value() != 100 and time.monotonic() < deadline:
+                QTest.qWait(20)
             self.assertEqual(window.progress.value(), 100)
         self.assertTrue(window.result_path.stem.endswith('_1'))
         window.close()

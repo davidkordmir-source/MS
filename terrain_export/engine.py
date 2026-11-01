@@ -23,6 +23,7 @@ class Options:
     aoi_geometry: dict | None = None
     aoi_crs: str = ""
     tile_size: int = 1024
+    acceleration: str = 'auto'
 
 
 class CancelledError(Exception):

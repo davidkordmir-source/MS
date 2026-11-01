@@ -27,3 +27,7 @@ PyInstaller https://pyinstaller.org/ (GPL with bootloader exception)
 
 The application performs local file processing. It has no updater or online
 activation and does not require Internet access on the destination computer.
+
+PyOpenCL https://documen.tician.de/pyopencl/ (see bundled upstream notices)
+OpenCL ICD Loader https://github.com/KhronosGroup/OpenCL-ICD-Loader (see bundled notices)
+Hardware vendor GPU drivers are provided by the destination system, not this installer.

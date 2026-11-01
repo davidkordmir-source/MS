@@ -10,39 +10,20 @@ import numpy as np
 import fiona
 import rasterio
 from rasterio.enums import Resampling
-from PySide6.QtCore import QThread, Signal, Qt, QUrl
+from PySide6.QtCore import QThread, Signal, Qt, QUrl, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap, QPainter, QPen, QColor, QPainterPath
 from PySide6.QtWidgets import (QApplication, QWidget, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QPushButton, QFileDialog, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox,
-    QTextEdit, QLabel, QMessageBox, QFrame, QScrollArea, QProgressBar, QSplitter, QSizePolicy, QTabWidget)
+    QTextEdit, QLabel, QMessageBox, QFrame, QScrollArea, QProgressBar, QSplitter, QSizePolicy, QTabWidget, QGraphicsOpacityEffect)
 from terrain_export.engine import Options, extract, CancelledError
 from terrain_export.surface import load_surface, project
 from terrain_export.map_canvas import MapCanvas
+from terrain_export.preview_canvas import SurfacePreview
+from terrain_export.widgets import ParameterCombo, ParameterInteger, ParameterNumber, MotionButton
 from shapely.geometry import shape
 
-STYLE = '''
-QWidget {font-family: 'Segoe UI', Tahoma; font-size: 13px; color: #18364a;}
-QWidget#shell {background: #eef3f6;}
-QFrame#card {background: white; border: 1px solid #dce6ec; border-radius: 14px;}
-QFrame#header {background: #102c40; border-radius: 14px;}
-QLabel#brand {color: #f5fbff; font-size: 26px; font-weight: 700;}
-QLabel#subtitle {color: #a5c9d8; font-size: 13px;}
-QLabel#section {font-size: 16px; font-weight: 700; color: #123b4b;}
-QLabel#muted {color: #587486; font-size: 12px;}
-QLabel#status {font-weight: 600; color: #087e78; padding: 8px;}
-QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {background: #f7fafc; border: 1px solid #cbdbe5; border-radius: 7px; padding: 7px; min-height: 21px;}
-QLineEdit:focus, QDoubleSpinBox:focus {border: 1px solid #079c92;}
-QPushButton {background: #e8f0f4; border: none; border-radius: 7px; padding: 10px 14px; font-weight: 600;}
-QPushButton:hover {background: #d5e6ed;}
-QPushButton#primary {background: #087f79; color: white; min-height: 28px; font-size: 15px;}
-QPushButton#primary:hover {background: #076962;}
-QPushButton:disabled {background: #e2e8ec; color: #91a3ac;}
-QTextEdit {background: #f6f9fb; border: 1px solid #dce6ec; border-radius: 8px; padding: 8px; font-family: Consolas, Tahoma; font-size: 12px;}
-QProgressBar {border: none; background: #e0eded; border-radius: 4px; height: 7px;}
-QProgressBar::chunk {background: #09a795; border-radius: 4px;}
-QScrollArea {border: none; background: transparent;}
-QToolTip {background: #102c40; color: white; padding: 6px;}
-'''
+from terrain_export.theme import STYLE
+from terrain_export.branding import app_icon, asset_path
 
 
 def logger():
@@ -71,7 +52,7 @@ def friendly_error(exc):
         'defined CRS': 'سیستم مختصات شیپ فایل مشخص نیست. کد EPSG صحیح آن را در بخش ورودی وارد کنید؛ حدس نزنید.',
         'Raster CRS': 'رستر سیستم مختصات ندارد. ابتدا CRS صحیح را در نرم‌افزار GIS به فایل معرفی کنید.',
         'Minimum elevation': 'حد پایین ارتفاع باید کوچک‌تر یا مساوی حد بالا باشد.',
-        'memory limit': 'محدوده بیش از ظرفیت پردازش این نسخه است (۴۰ میلیون سلول). محدوده را کوچک‌تر یا رستر را کم‌حجم کنید.',
+        'memory limit': 'حافظه برای این بخش کافی نیست؛ اندازه قطعه پردازش یا محدوده را کوچک‌تر کنید.',
         'existing': 'نام خروجی قبلاً استفاده شده است. یک نام جدید انتخاب کنید.',
         'unavailable': 'باند انتخابی در رستر وجود ندارد.',
         'invalid geometry': 'لایه خالی است یا هندسه قابل پردازش ندارد.',
@@ -126,8 +107,9 @@ class Window(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName('shell')
-        self.setStyleSheet(STYLE)
-        self.setWindowTitle('Terrain Studio 0.4.0 | رسم محدوده و استخراج ارتفاع')
+        self.setWindowIcon(app_icon())
+        self.setStyleSheet(STYLE.replace('ASSET_ROOT', asset_path('').as_posix()))
+        self.setWindowTitle('Terrain Studio 0.5.0 | رسم محدوده و استخراج ارتفاع')
         self.setLayoutDirection(Qt.RightToLeft)
         self.resize(1220, 950)
         self.setMinimumSize(980, 700)
@@ -138,15 +120,18 @@ class Window(QWidget):
         self.preview_geometry = None
         self.preview_affine = None
         self.preview_crs = None
+        self.preview_metadata = None
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
         root.setSpacing(14)
         header = QFrame(); header.setObjectName('header')
         hl = QVBoxLayout(header); hl.setContentsMargins(22, 16, 22, 16)
         brand_row = QHBoxLayout(); hl.addLayout(brand_row)
+        logo = QLabel(); logo.setPixmap(QPixmap(str(asset_path('terrain-studio.png'))).scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)); brand_row.addWidget(logo)
         brand_row.addWidget(self.label('Terrain Studio  /  استودیو ارتفاع', 'brand'), 1)
-        demo = QPushButton('داده نمونه'); demo.clicked.connect(self.load_sample); brand_row.addWidget(demo)
-        hl.addWidget(self.label('۰.۴.۰    •    رستر را انتخاب کنید، محدوده بکشید، یک لایه خروجی بگیرید', 'subtitle'))
+        self.stage_badge = self.label('۱  انتخاب فایل ارتفاعی', 'stage'); brand_row.addWidget(self.stage_badge)
+        demo = MotionButton('داده نمونه'); demo.clicked.connect(self.load_sample); brand_row.addWidget(demo)
+        hl.addWidget(self.label('۰.۵.۰    •    رستر را انتخاب کنید، محدوده بکشید، یک لایه خروجی بگیرید', 'subtitle'))
         root.addWidget(header)
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
@@ -155,12 +140,12 @@ class Window(QWidget):
         scroll.setWidget(self.controls); splitter.addWidget(scroll)
         c, l = self.card('۱  /  محدوده و داده ارتفاعی'); formroot.addWidget(c)
         form = QFormLayout(); form.setSpacing(10); l.addLayout(form)
-        self.height_kind = QComboBox(); self.height_kind.addItems(['نوع مدل را انتخاب کنید…', 'ارتفاع ثبت‌شده در DEM', 'ارتفاع ثبت‌شده در DSM'])
+        self.height_kind = ParameterCombo(); self.height_kind.addItems(['نوع مدل را انتخاب کنید…', 'ارتفاع ثبت‌شده در DEM', 'ارتفاع ثبت‌شده در DSM'])
         self.height_kind.setCurrentIndex(1); form.addRow('نوع مدل ورودی', self.height_kind)
         self.raster = self.file_row(form, 'فایل DEM یا DSM', 'Raster (*.tif *.tiff *.img *.asc);;All files (*)')
-        self.band = QSpinBox(); self.band.setRange(1, 999); form.addRow('باند ارتفاع', self.band)
-        self.unit = QComboBox(); self.unit.addItems(['واحد فایل فاقد متادیتا را انتخاب کنید…', 'متر', 'فوت']); form.addRow('واحد ارتفاع نامشخص', self.unit)
-        self.aoi_mode = QComboBox(); self.aoi_mode.addItems(['رسم محدوده روی نقشه', 'شیپ‌فایل محدوده آماده'])
+        self.band = ParameterInteger(); self.band.setRange(1, 999); form.addRow('باند ارتفاع', self.band)
+        self.unit = ParameterCombo(); self.unit.addItems(['واحد فایل فاقد متادیتا را انتخاب کنید…', 'متر', 'فوت']); form.addRow('واحد ارتفاع نامشخص', self.unit)
+        self.aoi_mode = ParameterCombo(); self.aoi_mode.addItems(['رسم محدوده روی نقشه', 'شیپ‌فایل محدوده آماده'])
         form.addRow('انتخاب محدوده', self.aoi_mode)
         self.vector_controls = QWidget(); vector_form = QFormLayout(self.vector_controls); vector_form.setContentsMargins(0, 0, 0, 0)
         self.vector = self.file_row(vector_form, 'محدوده آماده', 'Shapefile (*.shp)')
@@ -172,20 +157,24 @@ class Window(QWidget):
         self.raster_info = self.label('اندازه، مختصات و نمونه ارتفاع پس از انتخاب فایل نمایش داده می‌شود.', 'muted'); l.addWidget(self.raster_info)
         c, l = self.card('۲  /  شرط ارتفاع و خروجی'); formroot.addWidget(c)
         form = QFormLayout(); form.setSpacing(10); l.addLayout(form)
-        self.refresh = QPushButton('بررسی محدوده و پیش‌نمایش واقعی'); self.refresh.clicked.connect(self.inspect_raster); l.addWidget(self.refresh)
-        self.mode = QComboBox(); self.mode.addItems(['بین دو ارتفاع • شامل مرزها', 'بیشتر از حد پایین', 'کمتر از حد بالا']); self.mode.setCurrentIndex(1)
-        form.addRow('نوع شرط', self.mode)
+        self.refresh = MotionButton('بررسی محدوده و پیش‌نمایش واقعی'); self.refresh.clicked.connect(self.inspect_raster); l.addWidget(self.refresh)
+        self.mode = ParameterCombo(); self.mode.addItems(['ارتفاع بین دو مقدار باشد', 'ارتفاع از مقدار تعیین‌شده بالاتر باشد', 'ارتفاع از مقدار تعیین‌شده پایین‌تر باشد']); self.mode.setCurrentIndex(1)
+        form.addRow('شرط انتخاب عوارض', self.mode)
         self.minimum = self.number(30); self.maximum = self.number(100)
-        form.addRow('حد پایین', self.minimum); form.addRow('حد بالا', self.maximum)
+        form.addRow('از ارتفاع (متر)', self.minimum); form.addRow('تا ارتفاع (متر)', self.maximum)
         self.filter_form = form
+        self._last_mode = 1
+        self.condition_summary = self.label('', 'condition'); l.addWidget(self.condition_summary)
         self.output = self.file_row(form, 'فایل خروجی', 'Shapefile (*.shp)', True)
         l.addWidget(self.label('مرجع ارتفاع فقط همین فایل انتخابی است. شرط و آمار خروجی به متر هستند؛ هیچ ارتفاع زمین یا فایل دیگری از آن کم نمی‌شود.', 'muted'))
         l.addWidget(self.label('هر ناحیه جدا یک پلیگون و یک ردیف با حداقل، حداکثر و میانگین ارتفاع دارد؛ همه در یک لایه ذخیره می‌شوند. دقت مرز تابع اندازه پیکسل است و اجسام چسبیده لزوماً جدا نمی‌شوند.', 'muted'))
         c, l = self.card('۳  /  تنظیمات پردازش'); formroot.addWidget(c)
         form = QFormLayout(); l.addLayout(form)
-        self.workers = QSpinBox(); self.workers.setRange(1, min(256, os.cpu_count() or 1)); self.workers.setValue(min(32, os.cpu_count() or 1))
+        self.workers = ParameterInteger(); self.workers.setRange(1, min(256, os.cpu_count() or 1)); self.workers.setValue(min(32, os.cpu_count() or 1))
         form.addRow('رشته‌های CPU', self.workers)
-        self.gpu = QCheckBox('CUDA اختیاری — در این نصاب موجود نیست'); self.gpu.setEnabled(False); form.addRow(self.gpu)
+        self.compute_mode = ParameterCombo(); self.compute_mode.addItems(['انتخاب خودکار CPU یا GPU', 'فقط CPU', 'استفاده از GPU در صورت دسترسی'])
+        form.addRow('شتاب پردازش', self.compute_mode)
+        self.hardware_info = self.label('CPU چندرشته‌ای؛ GPU در صورت وجود درایور سازگار و برتری سرعت به کار گرفته می‌شود.', 'muted'); l.addWidget(self.hardware_info)
         formroot.addStretch()
         right = QWidget(); rightlayout = QVBoxLayout(right); rightlayout.setContentsMargins(10, 0, 0, 0)
         right_scroll = QScrollArea(); right_scroll.setWidgetResizable(True); right_scroll.setWidget(right)
@@ -193,16 +182,27 @@ class Window(QWidget):
         c, l = self.card('نقشه و پیش‌نمایش'); c.setMinimumHeight(400); rightlayout.addWidget(c, 3)
         self.map_tabs = QTabWidget(); self.map_tabs.setMinimumHeight(310); l.addWidget(self.map_tabs, 1)
         map_page = QWidget(); map_layout = QVBoxLayout(map_page); map_layout.setContentsMargins(0, 8, 0, 0)
+        zoom_bar = QHBoxLayout(); map_layout.addLayout(zoom_bar)
+        self.zoom_in = MotionButton('+'); self.zoom_out = MotionButton('−')
+        self.zoom_in.setFixedWidth(40); self.zoom_out.setFixedWidth(40)
+        self.zoom_label = self.label('۱۰۰٪', 'zoom')
+        zoom_bar.addWidget(self.zoom_in); zoom_bar.addWidget(self.zoom_out); zoom_bar.addWidget(self.zoom_label); zoom_bar.addStretch()
+        self.detail_status = self.label('نمای زنده فایل اصلی', 'muted'); zoom_bar.addWidget(self.detail_status)
         self.canvas = MapCanvas(); map_layout.addWidget(self.canvas, 1)
+        self.zoom_in.clicked.connect(lambda: self.canvas.zoom_by(1.5))
+        self.zoom_out.clicked.connect(lambda: self.canvas.zoom_by(1/1.5))
+        self.canvas.zoom_changed.connect(self.show_zoom)
+        self.canvas.detail_ready.connect(lambda result: self.detail_status.setText('جزئیات فایل اصلی بارگذاری شد'))
+        self.canvas.render_backend.connect(lambda backend: self.detail_status.setToolTip(backend))
         self.map_tools = QWidget(); map_actions = QHBoxLayout(self.map_tools); map_actions.setContentsMargins(0, 0, 0, 0); map_layout.addWidget(self.map_tools)
-        self.draw_button = QPushButton('رسم محدوده'); self.draw_button.clicked.connect(self.canvas.begin_area); map_actions.addWidget(self.draw_button)
-        self.finish_draw = QPushButton('پایان رسم'); self.finish_draw.clicked.connect(self.canvas.finish_area); map_actions.addWidget(self.finish_draw)
-        clear_draw = QPushButton('پاک‌کردن'); clear_draw.clicked.connect(self.canvas.clear_area); map_actions.addWidget(clear_draw)
-        fit_map = QPushButton('نمای کامل'); fit_map.clicked.connect(self.canvas.fit_map); map_actions.addWidget(fit_map)
+        self.draw_button = MotionButton('رسم محدوده'); self.draw_button.clicked.connect(self.canvas.begin_area); map_actions.addWidget(self.draw_button)
+        self.finish_draw = MotionButton('پایان رسم'); self.finish_draw.clicked.connect(self.canvas.finish_area); map_actions.addWidget(self.finish_draw)
+        clear_draw = MotionButton('پاک‌کردن'); clear_draw.clicked.connect(self.canvas.clear_area); map_actions.addWidget(clear_draw)
+        fit_map = MotionButton('نمای کامل'); fit_map.clicked.connect(self.canvas.fit_map); map_actions.addWidget(fit_map)
         self.map_hint = self.label('فایل ارتفاعی را انتخاب کنید؛ زوم با چرخ ماوس، جابه‌جایی با کشیدن نقشه.', 'muted'); map_layout.addWidget(self.map_hint)
         self.canvas.notice.connect(self.map_hint.setText)
         self.map_tabs.addTab(map_page, 'رسم محدوده')
-        self.preview = QLabel('DEM/DSM را انتخاب کنید\n\nپیش‌نمایش نمونه‌برداری‌شده از رستر اینجا نمایش داده می‌شود.')
+        self.preview = SurfacePreview(); self.preview.setText('فایل ارتفاعی و محدوده را انتخاب کنید.')
         self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumSize(300, 150)
         self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.preview.setStyleSheet('background: #102c40; color: #95bbca; border-radius: 10px;')
@@ -215,11 +215,11 @@ class Window(QWidget):
         self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLayoutDirection(Qt.LeftToRight)
         self.log.setMinimumHeight(40); self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored); l.addWidget(self.log, 1)
         actions = QHBoxLayout(); l.addLayout(actions)
-        self.open_output = QPushButton('پوشه خروجی'); self.open_output.setEnabled(False); self.open_output.clicked.connect(self.open_folder); actions.addWidget(self.open_output)
-        log_button = QPushButton('ذخیره گزارش'); log_button.clicked.connect(self.save_log); actions.addWidget(log_button)
+        self.open_output = MotionButton('پوشه خروجی'); self.open_output.setEnabled(False); self.open_output.clicked.connect(self.open_folder); actions.addWidget(self.open_output)
+        log_button = MotionButton('ذخیره گزارش'); log_button.clicked.connect(self.save_log); actions.addWidget(log_button)
         bottom = QHBoxLayout(); root.addLayout(bottom)
-        self.run_button = QPushButton('شروع استخراج پلیگون  ←'); self.run_button.setObjectName('primary'); self.run_button.clicked.connect(self.start); bottom.addWidget(self.run_button, 1)
-        self.cancel_button = QPushButton('لغو پردازش'); self.cancel_button.setEnabled(False); self.cancel_button.clicked.connect(self.cancel); bottom.addWidget(self.cancel_button)
+        self.run_button = MotionButton('شروع استخراج پلیگون  ←'); self.run_button.setObjectName('primary'); self.run_button.clicked.connect(self.start); bottom.addWidget(self.run_button, 1)
+        self.cancel_button = MotionButton('لغو پردازش'); self.cancel_button.setEnabled(False); self.cancel_button.clicked.connect(self.cancel); bottom.addWidget(self.cancel_button)
         self.vector.editingFinished.connect(self.inspect_vector)
         self.aoi_mode.currentIndexChanged.connect(lambda index: self.vector_controls.setVisible(index == 1))
         self.aoi_mode.currentIndexChanged.connect(self.inspect_raster)
@@ -231,17 +231,33 @@ class Window(QWidget):
         self.unit.currentIndexChanged.connect(self.inspect_raster)
         self.crs_override.editingFinished.connect(self.inspect_raster)
         self.mode.currentIndexChanged.connect(self.update_limits)
-        self.minimum.valueChanged.connect(self.render_preview); self.maximum.valueChanged.connect(self.render_preview)
+        self.minimum.valueChanged.connect(self.update_condition_summary); self.maximum.valueChanged.connect(self.update_condition_summary)
         self.update_limits()
+        self.success_motion = QPropertyAnimation(self.progress, b'value', self)
+        self.success_motion.setDuration(320); self.success_motion.setEasingCurve(QEasingCurve.OutCubic)
+        self.render_timer = QTimer(self.canvas); self.render_timer.setSingleShot(True)
+        self.render_timer.timeout.connect(self.canvas.enable_hardware_rendering); self.render_timer.start(0)
+    def show_zoom(self, scale):
+        fit = getattr(self.canvas, 'fit_scale', 1.)
+        text = f'{scale/max(fit, .0001)*100:.0f}٪'.translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))
+        self.zoom_label.setText(text)
+    def set_stage(self, text):
+        self.stage_badge.setText(text)
+        effect = self.stage_badge.graphicsEffect()
+        if effect is None:
+            effect = QGraphicsOpacityEffect(self.stage_badge); self.stage_badge.setGraphicsEffect(effect)
+            self.stage_motion = QPropertyAnimation(effect, b'opacity', self)
+        self.stage_motion.stop()
+        self.stage_motion.setDuration(220); self.stage_motion.setStartValue(.45); self.stage_motion.setEndValue(1.); self.stage_motion.start()
     def label(self, text, name):
         label = QLabel(text); label.setObjectName(name); label.setWordWrap(True); return label
     def card(self, title):
         frame = QFrame(); frame.setObjectName('card'); layout = QVBoxLayout(frame); layout.setContentsMargins(18, 16, 18, 16); layout.setSpacing(12)
         layout.addWidget(self.label(title, 'section')); return frame, layout
     def number(self, value, low=-1_000_000, high=1_000_000):
-        box = QDoubleSpinBox(); box.setRange(low, high); box.setDecimals(2); box.setValue(value); box.setGroupSeparatorShown(True); return box
+        box = ParameterNumber(); box.setRange(low, high); box.setDecimals(2); box.setValue(value); box.setGroupSeparatorShown(True); return box
     def file_row(self, form, title, pattern, save=False):
-        row = QHBoxLayout(); edit = FileEdit(); button = QPushButton('انتخاب')
+        row = QHBoxLayout(); edit = FileEdit(); button = MotionButton('انتخاب')
         def choose():
             dialog = QFileDialog.getSaveFileName if save else QFileDialog.getOpenFileName
             name, _ = dialog(self, title, edit.text(), pattern)
@@ -273,7 +289,8 @@ class Window(QWidget):
             height_kind=['', 'dem', 'dsm'][self.height_kind.currentIndex()],
             unit_scale=[None, 1., .3048][self.unit.currentIndex()],
             aoi_geometry=self.canvas.area_geometry() if self.aoi_mode.currentIndex() == 0 else None,
-            aoi_crs=str(self.canvas.crs) if self.canvas.crs is not None else '')
+            aoi_crs=str(self.canvas.crs) if self.canvas.crs is not None else '',
+            gpu=self.compute_mode.currentIndex() != 1, acceleration=['auto', 'cpu', 'gpu'][self.compute_mode.currentIndex()])
     def refresh_map(self):
         path, band = self.raster.text().strip(), self.band.value()
         if not path:
@@ -290,7 +307,8 @@ class Window(QWidget):
             values = src.read(band, out_shape=(height, width), masked=True, resampling=Resampling.nearest).astype('float64').filled(np.nan)
             from affine import Affine
             affine = src.transform * Affine.scale(src.width/width, src.height/height)
-            self.canvas.set_raster(values, affine, src.crs, key)
+            self.canvas.set_raster(values, affine, src.crs, key, source_path=path, band=band, source_size=(src.width, src.height))
+            self.set_stage('۲  محدوده را روی نقشه مشخص کنید')
             self.map_hint.setText(f'اندازه پیکسل: {abs(src.transform.a):g} × {abs(src.transform.e):g} در واحد CRS • {src.crs} • «رسم محدوده» را بزنید.')
         if not self.output.text():
             self.output.setText(str(Path(path).with_name(Path(path).stem + '_polygons.shp')))
@@ -299,6 +317,7 @@ class Window(QWidget):
         self.preview_geometry = None
         self.preview_affine = None
         self.preview_crs = None
+        self.preview_metadata = None
         self.preview.clear()
         self.preview.setText(message)
         self.raster_info.setText('پس از انتخاب ورودی‌های معتبر، اطلاعات ارتفاع و مختصات نمایش داده می‌شود.')
@@ -317,11 +336,13 @@ class Window(QWidget):
         try:
             o = self.options()
             self.sample, self.preview_affine, self.preview_crs, original, crs, self.preview_geometry, metadata = load_surface(o, max_side=600)
+            self.preview_metadata = metadata
             from pyproj import CRS
             center = project(original, crs, CRS.from_epsg(4326)).representative_point()
             self.raster_info.setText(f"منبع: {metadata['reference']}  •  واحد خروجی: {metadata['z_unit']}  •  {metadata['output_crs']}")
             self.raster_info.setToolTip(f'مرکز محدوده: طول {center.x:.6f} / عرض {center.y:.6f}')
             self.render_preview()
+            self.set_stage('۳  ارتفاع را تعیین و استخراج کنید')
             if drawn: self.vector_info.setText('محدوده روی نقشه ثبت شد؛ خروجی در CRS همین رستر خواهد بود.')
         except Exception as exc:
             self.reset_preview(friendly_error(exc)); self.raster_info.setText(str(exc))
@@ -334,38 +355,34 @@ class Window(QWidget):
         self.mode.setCurrentIndex(1); self.minimum.setValue(180); self.maximum.setValue(250)
         self.status.setText('نمونه مصنوعی: ارتفاع ثبت‌شده در DSM بالای ۱۸۰ متر • شروع استخراج را بزنید.')
     def update_limits(self):
+        mode = self.mode.currentIndex()
+        if mode == 2 and self._last_mode == 1:
+            self.maximum.setValue(self.minimum.value())
+        elif mode == 1 and self._last_mode == 2:
+            self.minimum.setValue(self.maximum.value())
+        self._last_mode = mode
         self.minimum.setEnabled(self.mode.currentIndex() != 2); self.maximum.setEnabled(self.mode.currentIndex() != 1)
         self.filter_form.setRowVisible(self.minimum, self.mode.currentIndex() != 2)
         self.filter_form.setRowVisible(self.maximum, self.mode.currentIndex() != 1)
+        self.filter_form.labelForField(self.minimum).setText('از ارتفاع (متر)' if mode == 0 else 'ارتفاع مبنا (متر)')
+        self.filter_form.labelForField(self.maximum).setText('تا ارتفاع (متر)' if mode == 0 else 'ارتفاع مبنا (متر)')
+        self.update_condition_summary()
+    def update_condition_summary(self):
+        def number(value):
+            return f'{value:g}'.translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))
+        low, high = number(self.minimum.value()), number(self.maximum.value())
+        messages = [f'ارتفاع عوارض از {low} تا {high} متر باشد؛ شامل دو مرز.',
+                    f'ارتفاع عوارض از {low} متر بالاتر باشد.',
+                    f'ارتفاع عوارض از {high} متر پایین‌تر باشد.']
+        self.condition_summary.setText(messages[self.mode.currentIndex()])
         self.render_preview()
     def render_preview(self):
         if self.sample is None: return
         z = self.sample; valid = np.isfinite(z)
         if not valid.any():
             self.preview.clear(); self.preview.setText('در محدوده انتخابی، داده ارتفاعی معتبر وجود ندارد.'); return
-        low, high = np.percentile(z[valid], [2, 98]); norm = np.clip((np.nan_to_num(z, nan=low) - low) / max(high-low, .001), 0, 1)
-        rgb = np.stack([35+norm*173, 61+norm*162, 73+norm*130], axis=-1).astype('uint8')
-        selected = valid.copy(); mode = self.mode.currentIndex()
-        if mode in (0, 1): selected &= z >= self.minimum.value() if mode == 0 else z > self.minimum.value()
-        if mode in (0, 2): selected &= z <= self.maximum.value() if mode == 0 else z < self.maximum.value()
-        rgb[selected] = (rgb[selected] * .35 + np.array([8, 205, 177]) * .65).astype('uint8'); rgb[~valid] = [16, 44, 64]
-        rgb = np.ascontiguousarray(rgb); h, w = rgb.shape[:2]
-        pixmap = QPixmap.fromImage(QImage(rgb.data, w, h, w*3, QImage.Format_RGB888).copy())
-        if self.preview_geometry is not None:
-            painter = QPainter(pixmap); painter.setPen(QPen(QColor('#ffe59b'), 2))
-            inverse = ~self.preview_affine
-            polygons = [self.preview_geometry] if self.preview_geometry.geom_type == 'Polygon' else list(self.preview_geometry.geoms)
-            for polygon in polygons:
-                if polygon.geom_type != 'Polygon': continue
-                for ring in [polygon.exterior, *polygon.interiors]:
-                    path = QPainterPath()
-                    for i, (x, y) in enumerate(ring.coords):
-                        col, row = inverse * (x, y)
-                        if i == 0: path.moveTo(col, row)
-                        else: path.lineTo(col, row)
-                    path.closeSubpath(); painter.drawPath(path)
-            painter.end()
-        self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.preview.set_surface(z, self.preview_affine, self.preview_crs, self.preview_geometry, self.options(), self.preview_metadata)
+
     def start(self):
         o = self.options()
         if not o.height_kind:
@@ -386,12 +403,22 @@ class Window(QWidget):
         self.controls.setEnabled(False); self.run_button.setEnabled(False); self.cancel_button.setEnabled(True); self.open_output.setEnabled(False)
         self.canvas.setEnabled(False); self.map_tools.setEnabled(False)
         self.progress.setRange(0, 0); self.status.setText('در حال پردازش…'); self.log.clear(); self.log.append('Output: ' + o.output)
+        self.run_button.setText('در حال استخراج عوارض…'); self.set_stage('در حال پردازش و ساخت شیپ‌فایل')
         self.worker = Worker(o, self); self.worker.message.connect(self.show_progress); self.worker.result.connect(self.done); self.worker.finished.connect(self.finished); self.worker.start()
     def show_progress(self, message):
         self.log.append(message)
+        if message.startswith('Acceleration:'):
+            self.hardware_info.setText('روش فعال: '+message.split(':', 1)[1].strip())
+        elif message.startswith('GPU unavailable') or message.startswith('GPU failed'):
+            self.hardware_info.setText('شتاب GPU در دسترس نیست؛ پردازش با CPU ادامه دارد.')
         if message.startswith('Writing polygons:'): self.status.setText('در حال ذخیره نواحی • ' + message.split(':', 1)[1])
     def done(self, success, message):
-        self.progress.setRange(0, 100); self.progress.setValue(100 if success else 0); self.status.setText(message); self.log.append(message); self.open_output.setEnabled(success)
+        self.progress.setRange(0, 100); self.progress.setValue(0); self.status.setText(message); self.log.append(message); self.open_output.setEnabled(success)
+        if success:
+            self.success_motion.setStartValue(0); self.success_motion.setEndValue(100); self.success_motion.start()
+            self.set_stage('✓  خروجی آماده است')
+        else:
+            self.set_stage('شرایط ورودی را بررسی کنید')
         if not success and 'لغو' not in message and not self.silent:
             dialog = QMessageBox(QMessageBox.Warning, 'پردازش انجام نشد', message, parent=self)
             dialog.setDetailedText(self.log.toPlainText()); dialog.exec()
@@ -401,6 +428,7 @@ class Window(QWidget):
         if worker: worker.deleteLater()
         self.controls.setEnabled(True); self.update_limits(); self.run_button.setEnabled(True); self.cancel_button.setEnabled(False)
         self.canvas.setEnabled(True); self.map_tools.setEnabled(True)
+        self.run_button.setText('شروع استخراج پلیگون  ←')
     def cancel(self):
         if self.worker: self.worker.cancelled.set(); self.cancel_button.setEnabled(False); self.status.setText('درخواست لغو ثبت شد؛ منتظر پایان مرحله جاری…')
     def open_folder(self):

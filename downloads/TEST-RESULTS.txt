@@ -1,32 +1,44 @@
-Terrain Studio 0.4.0 — validation on 2026-11-01
+Terrain Studio 0.5.0 — validation on 2026-11-01
 
-35 tests passed, zero failures, on Linux with Python 3.12.
-35 tests passed, zero failures, with Windows Python 3.12.10 under Wine 10.
-GUI tests include actual mouse clicks to draw an AOI, a single DSM with no DEM,
-one output dataset with separate feature heights read from that same raster,
-invalid drawing rejection, repeated output, error recovery, stale preview,
-NoData, and map layout at 980x700 and 1220x950.
-Spatial tests independently compare output with selected cells intersected with
-the AOI, including five locations, holes, disconnected clipped parts, CRS,
-scale/offset, units, NoData and tile seams. Legacy DEM/DSM difference tests are
-retained for backend compatibility; the new GUI uses one raster's elevation.
+43 tests passed, zero failures, on Linux with Python 3.12.
+43 tests passed, zero failures, with Windows Python 3.12.10 under Wine 10.
+Interaction tests send real wheel events to focused numeric fields and combo
+boxes, verify unchanged parameters and scrolling of the containing form, and
+verify that keyboard changes still work. Direction changes preserve the entered
+height and update the Persian condition sentence.
+Live zoom tests use a 2048x2048 raster and actual mouse-drawn AOI. Both the map
+and threshold preview read native source-window details after zoom, with the
+AOI geometry unchanged. Stale asynchronous results are discarded.
+Existing spatial, CRS, unit, NoData, exact clipping, per-feature statistics,
+single-raster input and one-dataset output tests remain passing.
 
-A 6500x6500 (42,250,000 pixel) synthetic DEM was extracted as one polygon with
-all pixels counted and min/max/mean 50 metres, exceeding the old cell limit.
-Processing is tiled with temporary disk storage and global polygonization.
+The exact float64 OpenCL threshold kernel was compiled and executed with POCL
+on a CPU OpenCL device: 12 cases of 8206 values, including NaN, infinities,
+signed zero, subnormals and values adjacent to a threshold, matched CPU results.
+This is kernel validation on CPU OpenCL, not physical GPU testing.
+GPU absence, device failure and CPU-faster auto selection have regression tests.
+The packaged Windows OpenCL binding loads successfully; GPU absence uses CPU.
 
-The frozen Windows EXE passed its self-test: single DSM values 140 and 160 give
-mean 150 above a strict threshold of 130; drawn AOI, CRS conversion, tile seams,
-exact clipping and GUI mouse drawing/extraction all passed.
-The x64 NSIS installer was installed silently into a workspace test directory.
-All 1114 installed payload files match the tested build by SHA256. The installed
-program passed its self-test from outside the source checkout.
-All Windows wheels match packaging/windows-wheel-hashes.sha256. Official Python
-and Microsoft SDK downloads matched NuGet SHA512 metadata. The SDK C runtime
-was needed for Wine compatibility testing and is not an elevation reference.
+A 42,250,000-pixel synthetic DEM was extracted as one polygon with exact pixel
+count and min/max/mean 50 metres using the parallel tile-reading pipeline.
+No universal speedup factor is claimed.
 
-No test on native Windows hardware or on the user's real raster data was done.
-Interactive installer pages were not exercised; silent installation was tested.
-No semantic building recognition is claimed. Boundaries follow raster cells;
-touching objects can merge. Shapefile size, disk space and geometry complexity
-still limit practical dataset size.
+The final frozen Windows executable passed extraction, bundled GPU binding /
+CPU fallback, animated startup, background GIS import, main-thread widget
+creation, branded window icon and renderer readiness checks.
+Wine exposed an OpenGL context whose framebuffer was empty; the application
+now detects unusable black/white frames and automatically restores CPU drawing.
+The corrected packaged map was visually verified.
+
+The x64 installer upgraded the existing test installation, preserved a synthetic
+user project file and created the Terrain Studio desktop shortcut. All 1183
+installed files match the tested build by SHA256. The installed program passed
+startup and extraction checks from outside the source checkout.
+The EXE has x64 machine type, file version 0.5.0.0 and embedded icon resources.
+New Windows wheels were verified against official PyPI SHA256 metadata.
+
+No native Windows hardware or physical NVIDIA/AMD/Intel GPU was available.
+Actual GPU speed and hardware rendering on those cards have not been verified.
+Interactive installer pages were not exercised; silent installation/upgrade
+was tested. Original user raster data was not supplied. Raster resolution,
+connected-object semantics and Shapefile format limits still apply.

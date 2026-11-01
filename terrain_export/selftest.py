@@ -8,6 +8,7 @@ from rasterio.transform import from_origin
 from shapely.geometry import box, mapping
 from terrain_export.engine import Options, extract
 from terrain_export.surface import project
+from terrain_export.acceleration import binding_report, ThresholdAccelerator
 from shapely.geometry import shape
 
 
@@ -34,5 +35,10 @@ def run():
                 raise RuntimeError('Output does not respect the requested AOI')
         if not all(output.with_suffix(s).exists() for s in ('.shp', '.shx', '.dbf', '.prj', '.cpg')):
             raise RuntimeError('Incomplete Shapefile bundle')
-    return {'status': 'passed', 'gis': 'single DSM >130; mean 150 from input; drawn AOI; UTM to WGS84; tile seams; exact clipping', 'gui': 'checked by launcher',
+    gpu = binding_report()
+    check = ThresholdAccelerator(Options('', '', '', gpu=True, acceleration='gpu', mode='above', minimum=30), lambda message: None)
+    if not np.array_equal(check.apply(np.array([[29., 30., 31., np.nan]])), [[False, False, True, False]]):
+        raise RuntimeError('Bundled acceleration / CPU fallback check failed')
+    gpu['tested_backend'] = check.backend
+    return {'status': 'passed', 'gis': 'single DSM >130; mean 150 from input; drawn AOI; UTM to WGS84; tile seams; exact clipping', 'gui': 'checked by launcher', 'gpu': gpu,
             'network_required': False}
