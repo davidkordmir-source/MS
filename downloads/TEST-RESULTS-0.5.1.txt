@@ -1,0 +1,29 @@
+Terrain Studio 0.5.1 — validation on 2026-11-02
+
+48 regression tests passed, zero failures and zero skips with Windows Python
+3.12.10 under Wine 10 on Debian 13. The extraction fix also passed all 48 tests
+on Linux before the release version metadata was updated.
+
+A stuck extraction was simulated in a separate process. The Qt event loop
+continued handling timer events; Cancel stopped processing and left no partial
+output files. A crashed child and an incomplete result also left no partial
+dataset. DSM CRS, three polygons and their elevation statistics were verified.
+
+The final frozen Windows executable passed the full sample extraction and GUI
+self-test. Startup verified version 0.5.1, splash, background imports, main-thread
+GUI, icon and renderer readiness. Under Wine the renderer used its CPU fallback.
+The OpenCL binding loaded; no physical GPU was available and CPU fallback worked.
+
+The installer upgraded 0.5.0 in a separate test directory and preserved a user
+project sentinel. All 1227 installed application files match the tested bundle by
+SHA256. The desktop shortcut exists. The installed application passed startup
+and sample DSM extraction when launched outside the source checkout. The program
+and installer are Windows x64 PE files.
+
+Windows Python and the Microsoft runtime were verified against official NuGet
+SHA512 metadata. All 28 Windows dependency wheels were verified against official
+PyPI SHA256 metadata. TLS and artifact verification remained enabled.
+
+No native Windows hardware, physical GPU or original user DSM was available.
+Large/complex data still require processing time and free disk space. The fix
+isolates extraction from the GUI; it does not guarantee faster polygonization.

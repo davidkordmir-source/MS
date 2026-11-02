@@ -1,0 +1,2 @@
+4242b3d4cce495e4622ecf0eba8d29b8597454e7645b8389227a138114a4c8da  TerrainStudio-0.5.1-Setup.exe
+893c57201f34dffca0bdea03bddc8751611b694c7182dfba0950c5bacd914e5e  TerrainStudio-0.5.1-Source.zip

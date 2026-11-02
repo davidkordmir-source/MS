@@ -15,7 +15,8 @@ from PySide6.QtGui import QDesktopServices, QFont, QImage, QPixmap, QPainter, QP
 from PySide6.QtWidgets import (QApplication, QWidget, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QPushButton, QFileDialog, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox,
     QTextEdit, QLabel, QMessageBox, QFrame, QScrollArea, QProgressBar, QSplitter, QSizePolicy, QTabWidget, QGraphicsOpacityEffect)
-from terrain_export.engine import Options, extract, CancelledError
+from terrain_export.engine import Options, CancelledError
+from terrain_export.extraction_process import extract_isolated
 from terrain_export.surface import load_surface, project
 from terrain_export.map_canvas import MapCanvas
 from terrain_export.preview_canvas import SurfacePreview
@@ -23,7 +24,7 @@ from terrain_export.widgets import ParameterCombo, ParameterInteger, ParameterNu
 from shapely.geometry import shape
 
 from terrain_export.theme import STYLE
-from terrain_export.branding import app_icon, asset_path
+from terrain_export.branding import app_icon, asset_path, VERSION
 
 
 def logger():
@@ -93,7 +94,7 @@ class Worker(QThread):
         self.cancelled = Event()
     def run(self):
         try:
-            count = extract(self.options, self.message.emit, self.cancelled.is_set)
+            count = extract_isolated(self.options, self.message.emit, self.cancelled.is_set)
             self.result.emit(True, f'{count:,} پلیگون با آمار ارتفاع ذخیره شد.')
         except CancelledError:
             self.result.emit(False, 'پردازش لغو شد؛ خروجی ذخیره نشد.')
@@ -109,7 +110,7 @@ class Window(QWidget):
         self.setObjectName('shell')
         self.setWindowIcon(app_icon())
         self.setStyleSheet(STYLE.replace('ASSET_ROOT', asset_path('').as_posix()))
-        self.setWindowTitle('Terrain Studio 0.5.0 | رسم محدوده و استخراج ارتفاع')
+        self.setWindowTitle(f'Terrain Studio {VERSION} | رسم محدوده و استخراج ارتفاع')
         self.setLayoutDirection(Qt.RightToLeft)
         self.resize(1220, 950)
         self.setMinimumSize(980, 700)
@@ -131,7 +132,8 @@ class Window(QWidget):
         brand_row.addWidget(self.label('Terrain Studio  /  استودیو ارتفاع', 'brand'), 1)
         self.stage_badge = self.label('۱  انتخاب فایل ارتفاعی', 'stage'); brand_row.addWidget(self.stage_badge)
         demo = MotionButton('داده نمونه'); demo.clicked.connect(self.load_sample); brand_row.addWidget(demo)
-        hl.addWidget(self.label('۰.۵.۰    •    رستر را انتخاب کنید، محدوده بکشید، یک لایه خروجی بگیرید', 'subtitle'))
+        version_fa = VERSION.translate(str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹'))
+        hl.addWidget(self.label(f'{version_fa}    •    رستر را انتخاب کنید، محدوده بکشید، یک لایه خروجی بگیرید', 'subtitle'))
         root.addWidget(header)
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter, 1)
@@ -170,7 +172,7 @@ class Window(QWidget):
         l.addWidget(self.label('هر ناحیه جدا یک پلیگون و یک ردیف با حداقل، حداکثر و میانگین ارتفاع دارد؛ همه در یک لایه ذخیره می‌شوند. دقت مرز تابع اندازه پیکسل است و اجسام چسبیده لزوماً جدا نمی‌شوند.', 'muted'))
         c, l = self.card('۳  /  تنظیمات پردازش'); formroot.addWidget(c)
         form = QFormLayout(); l.addLayout(form)
-        self.workers = ParameterInteger(); self.workers.setRange(1, min(256, os.cpu_count() or 1)); self.workers.setValue(min(32, os.cpu_count() or 1))
+        self.workers = ParameterInteger(); self.workers.setRange(1, min(256, os.cpu_count() or 1)); self.workers.setValue(min(4, os.cpu_count() or 1))
         form.addRow('رشته‌های CPU', self.workers)
         self.compute_mode = ParameterCombo(); self.compute_mode.addItems(['انتخاب خودکار CPU یا GPU', 'فقط CPU', 'استفاده از GPU در صورت دسترسی'])
         form.addRow('شتاب پردازش', self.compute_mode)
@@ -213,6 +215,7 @@ class Window(QWidget):
         self.status = self.label('آماده • فایل‌ها را انتخاب کنید', 'status'); l.addWidget(self.status)
         self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setValue(0); self.progress.setTextVisible(False); l.addWidget(self.progress)
         self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLayoutDirection(Qt.LeftToRight)
+        self.log.document().setMaximumBlockCount(1000)
         self.log.setMinimumHeight(40); self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored); l.addWidget(self.log, 1)
         actions = QHBoxLayout(); l.addLayout(actions)
         self.open_output = MotionButton('پوشه خروجی'); self.open_output.setEnabled(False); self.open_output.clicked.connect(self.open_folder); actions.addWidget(self.open_output)

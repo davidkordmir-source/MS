@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 from PySide6.QtGui import QIcon
 
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 WINDOWS_APP_ID = 'TerrainStudio.Desktop'
 
 

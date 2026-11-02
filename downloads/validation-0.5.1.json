@@ -1,0 +1,72 @@
+{
+  "version": "0.5.1",
+  "windows_python": "3.12.10",
+  "test_environment": "Wine 10 on Debian 13; not native Windows hardware",
+  "regression_tests": {
+    "passed": 48,
+    "failed": 0,
+    "skipped": 0
+  },
+  "installed_files_sha256_verified": 1227,
+  "user_file_preserved_during_upgrade": true,
+  "desktop_shortcut_created": true,
+  "native_windows_hardware_tested": false,
+  "user_dsm_tested": false,
+  "physical_gpu_tested": false,
+  "reports": {
+    "frozen-selftest.json": {
+      "status": "passed",
+      "gis": "single DSM >130; mean 150 from input; drawn AOI; UTM to WGS84; tile seams; exact clipping",
+      "gui": "single DSM; mouse-drawn AOI; zoomable preview; process-isolated extraction; one output dataset verified",
+      "gpu": {
+        "binding_loaded": true,
+        "version": "2026.1.4",
+        "gpu_devices": [],
+        "driver_query": "LogicError",
+        "gpu_available": false,
+        "tested_backend": "CPU"
+      },
+      "network_required": false,
+      "renderer": "رندر سازگار CPU"
+    },
+    "frozen-startup.json": {
+      "status": "passed",
+      "version": "0.5.1",
+      "splash_shown": true,
+      "background_import": true,
+      "gui_on_main_thread": true,
+      "window_visible": true,
+      "icon_loaded": true,
+      "startup_seconds": 2.281,
+      "renderer_ready": true,
+      "viewport": "QWidget"
+    },
+    "installed-selftest.json": {
+      "status": "passed",
+      "gis": "single DSM >130; mean 150 from input; drawn AOI; UTM to WGS84; tile seams; exact clipping",
+      "gui": "single DSM; mouse-drawn AOI; zoomable preview; process-isolated extraction; one output dataset verified",
+      "gpu": {
+        "binding_loaded": true,
+        "version": "2026.1.4",
+        "gpu_devices": [],
+        "driver_query": "LogicError",
+        "gpu_available": false,
+        "tested_backend": "CPU"
+      },
+      "network_required": false,
+      "renderer": "رندر سازگار CPU"
+    },
+    "installed-startup.json": {
+      "status": "passed",
+      "version": "0.5.1",
+      "splash_shown": true,
+      "background_import": true,
+      "gui_on_main_thread": true,
+      "window_visible": true,
+      "icon_loaded": true,
+      "startup_seconds": 2.124,
+      "renderer_ready": true,
+      "viewport": "QWidget"
+    }
+  }
+}

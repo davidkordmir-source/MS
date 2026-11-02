@@ -1,6 +1,9 @@
 import sys
 
 if __name__ == '__main__':
+    # Dispatch frozen Windows extraction workers before entering the GUI.
+    import multiprocessing
+    multiprocessing.freeze_support()
     if '--self-test' in sys.argv:
         import json
         import traceback
@@ -58,7 +61,7 @@ if __name__ == '__main__':
                 window.render_preview()
                 window.grab().save(str(report.with_name(report.stem+'-preview.png')))
             window.close()
-            result["gui"] = "single DSM; mouse-drawn AOI; zoomable preview; threaded extraction; one output dataset verified"
+            result["gui"] = "single DSM; mouse-drawn AOI; zoomable preview; process-isolated extraction; one output dataset verified"
             result['renderer'] = window.detail_status.toolTip()
             report.write_text(json.dumps(result, indent=2), encoding='utf-8')
         except Exception:

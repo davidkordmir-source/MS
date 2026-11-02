@@ -9,7 +9,7 @@ import numpy as np
 import rasterio
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtTest import QTest
 from terrain_export.gui import Window
 import test_engine as fixtures
@@ -78,6 +78,41 @@ class GuiIntegrationTests(unittest.TestCase):
         window.mode.setCurrentIndex(2)
         self.assertFalse(window.minimum.isEnabled())
         self.assertTrue(window.maximum.isEnabled())
+        window.close()
+
+    def test_ui_remains_responsive_and_cancels_a_stuck_dsm_export(self):
+        from test_extraction_process import blocked_child
+        window = Window(); window.silent = True; window.load_sample()
+        ticks = []
+        timer = QTimer(window); timer.setInterval(10)
+        timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+        with tempfile.TemporaryDirectory() as folder, patch('terrain_export.extraction_process._extract_child', blocked_child):
+            window.output.setText(str(Path(folder)/'cancelled.shp'))
+            window.start()
+            try:
+                deadline = time.monotonic()+10
+                while 'blocked child:' not in window.log.toPlainText() and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertIn('blocked child:', window.log.toPlainText())
+                timer.start()
+                deadline = time.monotonic()+1
+                while len(ticks) < 10 and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertGreaterEqual(len(ticks), 10, 'DSM processing blocked the Qt event loop')
+                self.assertFalse(window.run_button.isEnabled())
+                started = time.monotonic()
+                window.cancel()
+                deadline = started+4
+                while not window.run_button.isEnabled() and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertTrue(window.run_button.isEnabled(), 'Cancellation did not stop the child')
+                self.assertFalse(window.open_output.isEnabled())
+                self.assertIn('لغو', window.status.text())
+                self.assertEqual(list(Path(folder).iterdir()), [])
+            finally:
+                timer.stop()
+                if window.worker:
+                    window.cancel(); window.worker.wait(5000); APP.processEvents()
         window.close()
 
     def test_dsm_only_workflow_does_not_require_dem(self):
