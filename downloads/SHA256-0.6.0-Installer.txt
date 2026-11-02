@@ -1,0 +1,1 @@
+d8743bd97bb6cbf8deb715a5501e1d971fca5a349b81e334682a8267e82ec8fa  TerrainStudio-0.6.0-Setup.exe
